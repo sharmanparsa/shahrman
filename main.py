@@ -4161,7 +4161,7 @@ async def main():
         try:
             await tick_task
         except asyncio.CancelledError:
-            pass
+             pass
 
         await web_runner.cleanup()
 

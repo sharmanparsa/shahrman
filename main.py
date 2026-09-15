@@ -1162,7 +1162,8 @@ async def building_handler(callback: CallbackQuery):
                             ]
                         ]
                     ),
-                )return
+                )
+                return
 
             await conn.execute("""
                 UPDATE resources

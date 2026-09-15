@@ -8,6 +8,7 @@ import asyncpg
 from aiohttp import web
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command
+from aiogram.enums import ParseMode
 from aiogram.types import (
     CallbackQuery,
     InlineKeyboardButton,
@@ -35,7 +36,10 @@ if not DATABASE_URL:
 
 logging.basicConfig(level=logging.INFO)
 
-bot = Bot(BOT_TOKEN)
+bot = Bot(
+    BOT_TOKEN,
+    default=DefaultBotProperties(parse_mode=ParseMode.HTML),
+)
 dp = Dispatcher()
 
 db_pool = None

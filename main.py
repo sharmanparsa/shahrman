@@ -37,10 +37,7 @@ if not DATABASE_URL:
 
 logging.basicConfig(level=logging.INFO)
 
-bot = Bot(
-    BOT_TOKEN,
-    default=DefaultBotProperties(parse_mode=ParseMode.HTML),
-)
+bot = Bot(BOT_TOKEN)
 dp = Dispatcher()
 
 db_pool = None

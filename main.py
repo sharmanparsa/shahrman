@@ -7,8 +7,9 @@ from datetime import datetime, timedelta, timezone
 import asyncpg
 from aiohttp import web
 from aiogram import Bot, Dispatcher, F
-from aiogram.filters import Command
+from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
+from aiogram.filters import Command
 from aiogram.types import (
     CallbackQuery,
     InlineKeyboardButton,
@@ -330,9 +331,8 @@ def clamp(value, minimum, maximum):
 
 
 def now_utc():
-    return datetime.now(timezone.utc)
-
-
+  return datetime.now(timezone.utc)
+    
 def main_keyboard():
     return InlineKeyboardMarkup(
         inline_keyboard=[
@@ -341,27 +341,31 @@ def main_keyboard():
                 InlineKeyboardButton(text="👑 شهردار", callback_data="mayor"),
             ],
             [
+                InlineKeyboardButton(text="👥 شهروندان", callback_data="citizens"),
                 InlineKeyboardButton(text="🏗️ ساختمان‌ها", callback_data="buildings"),
+            ],
+            [
                 InlineKeyboardButton(text="📦 منابع", callback_data="resources"),
-            ],
-            [
                 InlineKeyboardButton(text="💰 اقتصاد", callback_data="economy"),
+            ],
+            [
                 InlineKeyboardButton(text="🚨 بحران‌ها", callback_data="crises"),
-            ],
-            [
                 InlineKeyboardButton(text="🤝 اجتماعی", callback_data="social"),
+            ],
+            [
                 InlineKeyboardButton(text="🏆 رقابت", callback_data="ranking"),
-            ],
-            [
                 InlineKeyboardButton(text="🏪 بازار", callback_data="market"),
-                InlineKeyboardButton(text="👥 گروه‌ها", callback_data="groups"),
             ],
             [
+                InlineKeyboardButton(text="👥 گروه‌ها", callback_data="groups"),
                 InlineKeyboardButton(text="📰 روزنامه شهر", callback_data="news"),
+            ],
+            [
                 InlineKeyboardButton(text="🗺️ توسعه شهر", callback_data="expansion"),
             ],
         ]
     )
+
 
 
 def back_keyboard():
@@ -986,6 +990,292 @@ async def city_text(user_id):
 
 💰 مالیات: {city['tax_rate']}%
 """
+
+# =========================================================
+# CITIZENS SYSTEM
+# =========================================================
+
+def satisfaction_status(value):
+    if value >= 85:
+        return "😊 بسیار راضی"
+    elif value >= 70:
+        return "🙂 راضی"
+    elif value >= 55:
+        return "😐 معمولی"
+    elif value >= 40:
+        return "😕 ناراضی"
+    else:
+        return "😡 بسیار ناراضی"
+
+
+def employment_status(population, jobs):
+    if population <= 0:
+        return 100, 0
+
+    employed = min(population, jobs)
+    unemployment = clamp(
+        int((population - employed) * 100 / population),
+        0,
+        100,
+    )
+
+    return unemployment, employed
+
+
+async def calculate_citizen_metrics(user_id):
+    await recalculate_city(user_id)
+
+    city = await get_city(user_id)
+
+    if not city:
+        return None
+
+    population = city["population"]
+    jobs = city["jobs"]
+
+    unemployment, employed = employment_status(
+        population,
+        jobs,
+    )
+
+    housing_capacity = city["housing_capacity"]
+
+    if population <= housing_capacity:
+        housing_score = 100
+    else:
+        shortage = population - housing_capacity
+
+        housing_score = clamp(
+            100 - shortage * 2,
+            0,
+            100,
+        )
+
+    employment_score = clamp(
+        100 - unemployment * 2,
+        0,
+        100,
+    )
+
+    tax_score = clamp(
+        100 - max(0, city["tax_rate"] - 5) * 5,
+        0,
+        100,
+    )
+
+    water_score = clamp(
+        city["water"],
+        0,
+        100,
+    )
+
+    power_score = clamp(
+        city["power"],
+        0,
+        100,
+    )
+
+    security_score = clamp(
+        city["security"],
+        0,
+        100,
+    )
+
+    health_score = clamp(
+        city["health"],
+        0,
+        100,
+    )
+
+    education_score = clamp(
+        city["education"],
+        0,
+        100,
+    )
+
+    recreation_score = clamp(
+        city["recreation"],
+        0,
+        100,
+    )
+
+    infrastructure_score = clamp(
+        city["infrastructure"],
+        0,
+        100,
+    )
+
+    pollution_score = clamp(
+        100 - max(
+            0,
+            city["pollution_control"] - 20,
+        ),
+        0,
+        100,
+    )
+
+    overall = int(
+        security_score * 0.14
+        + health_score * 0.14
+        + employment_score * 0.14
+        + housing_score * 0.14
+        + water_score * 0.10
+        + power_score * 0.10
+        + education_score * 0.08
+        + recreation_score * 0.06
+        + infrastructure_score * 0.06
+        + tax_score * 0.04
+    )
+
+    overall = clamp(overall, 0, 100)
+
+    return {
+        "population": population,
+        "jobs": jobs,
+        "employed": employed,
+        "unemployment": unemployment,
+        "housing": housing_score,
+        "security": security_score,
+        "health": health_score,
+        "employment": employment_score,
+        "water": water_score,
+        "power": power_score,
+        "education": education_score,
+        "recreation": recreation_score,
+        "infrastructure": infrastructure_score,
+        "pollution": pollution_score,
+        "tax": tax_score,
+        "overall": overall,
+    }
+
+
+def citizen_bar(value):
+    value = clamp(value, 0, 100)
+
+    filled = value // 10
+    empty = 10 - filled
+
+    return "🟩" * filled + "⬜" * empty
+
+
+@dp.callback_query(F.data == "citizens")
+async def citizens_callback(callback: CallbackQuery):
+    await callback.answer()
+
+    user_id = callback.from_user.id
+
+    await process_player_tick(user_id)
+
+    metrics = await calculate_citizen_metrics(user_id)
+
+    if not metrics:
+        await callback.message.edit_text(
+            "❌ اطلاعات شهروندان پیدا نشد.",
+            reply_markup=back_keyboard(),
+        )
+        return
+
+    city = await get_city(user_id)
+
+    status = satisfaction_status(
+        metrics["overall"]
+    )
+
+    text = f"""
+👥 <b>شهروندان شهر</b>
+
+🏙️ شهر: {city['city_name']}
+
+👥 جمعیت: {metrics['population']:,}
+💼 شاغلان: {metrics['employed']:,}
+📉 بیکاری: {metrics['unemployment']}%
+
+😊 رضایت شهروندان:
+<b>{metrics['overall']}%</b>
+{status}
+
+{citizen_bar(metrics['overall'])}
+
+━━━━━━━━━━━━
+
+🏠 مسکن
+{metrics['housing']}%
+{citizen_bar(metrics['housing'])}
+
+💼 اشتغال
+{metrics['employment']}%
+{citizen_bar(metrics['employment'])}
+
+🚓 امنیت
+{metrics['security']}%
+{citizen_bar(metrics['security'])}
+
+🏥 سلامت
+{metrics['health']}%
+{citizen_bar(metrics['health'])}
+
+💧 آب
+{metrics['water']}%
+{citizen_bar(metrics['water'])}
+
+⚡ برق
+{metrics['power']}%
+{citizen_bar(metrics['power'])}
+
+🎓 آموزش
+{metrics['education']}%
+{citizen_bar(metrics['education'])}
+
+🌳 تفریح
+{metrics['recreation']}%
+{citizen_bar(metrics['recreation'])}
+
+🛣️ زیرساخت
+{metrics['infrastructure']}%
+
+🌫️ وضعیت محیط‌زیست
+{metrics['pollution']}%
+
+💰 رضایت از مالیات
+{metrics['tax']}%
+
+━━━━━━━━━━━━
+
+هرچه رضایت بیشتر باشد:
+
+📈 رشد جمعیت بیشتر می‌شود
+💰 درآمد شهر افزایش پیدا می‌کند
+👥 مهاجرت به شهر بیشتر می‌شود
+🏙️ توسعه شهر سریع‌تر می‌شود
+"""
+
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="🔄 بروزرسانی",
+                    callback_data="citizens",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="🏙️ شهر من",
+                    callback_data="city",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="🔙 منوی اصلی",
+                    callback_data="menu",
+                )
+            ],
+        ]
+    )
+
+    await callback.message.edit_text(
+        text,
+        reply_markup=keyboard,
+    )
 
 
 # =========================================================
@@ -1686,53 +1976,106 @@ async def social_callback(callback: CallbackQuery):
 
     async with db_pool.acquire() as conn:
 
-        friends = await conn.fetch("""
-            SELECT p.user_id, p.first_name, c.city_name
+        friends = await conn.fetch(
+            """
+            SELECT
+                p.user_id,
+                p.first_name,
+                c.city_name
             FROM friendships f
-            JOIN players p ON p.user_id=f.friend_id
-            JOIN cities c ON c.user_id=p.user_id
+            JOIN players p
+                ON p.user_id=f.friend_id
+            JOIN cities c
+                ON c.user_id=p.user_id
             WHERE f.user_id=$1
             LIMIT 10
-        """, user_id)
+            """,
+            user_id,
+        )
 
-        pending = await conn.fetchval("""
+        pending = await conn.fetchval(
+            """
             SELECT COUNT(*)
             FROM friend_requests
-            WHERE receiver_id=$1 AND status='pending'
-        """, user_id)
+            WHERE receiver_id=$1
+              AND status='pending'
+            """,
+            user_id,
+        )
 
-        groups = await conn.fetch("""
-            SELECT g.id, g.name
+        groups = await conn.fetch(
+            """
+            SELECT
+                g.id,
+                g.name
             FROM groups g
             JOIN group_members gm
-              ON gm.group_id=g.id
+                ON gm.group_id=g.id
             WHERE gm.user_id=$1
-        """, user_id)
+            """,
+            user_id,
+        )
 
     if friends:
-        friend_text = "\n".join(
-            f"👤 {f['first_name']} — {f['city_name']} | <code>{f['user_id']}</code>"
-            for f in friends
+
+        friend_lines = []
+
+        for friend in friends:
+
+            friend_lines.append(
+                f"👤 {friend['first_name']}\n"
+                f"🏙️ {friend['city_name']}\n"
+                f"🆔 شناسه: {friend['user_id']}"
+            )
+
+        friend_text = "\n\n".join(
+            friend_lines
         )
+
     else:
-        friend_text = "هنوز دوستی نداری."
+
+        friend_text = (
+            "هنوز دوستی نداری.\n"
+            "می‌توانی یک شهردار دیگر را به دوستانت اضافه کنی."
+        )
 
     if groups:
-        group_text = "\n".join(
-            f"👥 {g['name']} | ID: {g['id']}"
-            for g in groups
+
+        group_lines = []
+
+        for group in groups:
+
+            group_lines.append(
+                f"👥 {group['name']}\n"
+                f"🆔 شناسه گروه: {group['id']}"
+            )
+
+        group_text = "\n\n".join(
+            group_lines
         )
+
     else:
-        group_text = "عضو هیچ گروهی نیستی."
+
+        group_text = (
+            "عضو هیچ گروهی نیستی."
+        )
+
+    pending = pending or 0
 
     text = f"""
 🤝 <b>بخش اجتماعی</b>
 
-👤 <b>دوستان</b>
+👤 <b>دوستان من</b>
 
 {friend_text}
 
-📨 درخواست‌های دوستی جدید: {pending}
+━━━━━━━━━━━━
+
+📨 <b>درخواست‌های جدید</b>
+
+تعداد درخواست‌های جدید: {pending}
+
+━━━━━━━━━━━━
 
 👥 <b>گروه‌های من</b>
 
@@ -1740,48 +2083,36 @@ async def social_callback(callback: CallbackQuery):
 
 ━━━━━━━━━━━━
 
-📨 افزودن دوست:
-<code>/addfriend PLAYER_ID</code>
-
-📋 درخواست‌ها:
-<code>/friends</code>
-
-📤 کمک:
-<code>/help PLAYER_ID COINS FOOD MATERIALS</code>
-
-👥 ساخت گروه:
-<code>/creategroup نام گروه</code>
-
-🔗 عضویت:
-<code>/joingroup GROUP_ID</code>
+از دکمه‌های زیر برای مدیریت ارتباطاتت استفاده کن.
 """
+
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="📨 درخواست‌ها",
+                    callback_data="friend_requests",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="🔄 بروزرسانی",
+                    callback_data="social",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="🔙 بازگشت",
+                    callback_data="menu",
+                )
+            ],
+        ]
+    )
 
     await callback.message.edit_text(
         text,
-        reply_markup=InlineKeyboardMarkup(
-            inline_keyboard=[
-                [
-                    InlineKeyboardButton(
-                        text="📨 درخواست‌ها",
-                        callback_data="friend_requests",
-                    )
-                ],
-                [
-                    InlineKeyboardButton(
-                        text="🔄 دوستان",
-                        callback_data="social",
-                    )
-                ],
-                [
-                    InlineKeyboardButton(
-                        text="🔙 بازگشت",
-                        callback_data="menu",
-                    )
-                ],
-            ]
-        ),
+        reply_markup=keyboard,
     )
-
 
 # =========================================================
 # FRIEND REQUEST
@@ -3188,36 +3519,6 @@ async def expand_village(callback: CallbackQuery):
 # GAME TICK
 # =========================================================
 
-async def game_tick():
-    while True:
-
-        try:
-
-            async with db_pool.acquire() as conn:
-                users = await conn.fetch(
-                    "SELECT user_id FROM players"
-                )
-
-            for row in users:
-
-                try:
-                    await process_player_tick(row["user_id"])
-                except Exception as e:
-                    logging.exception(
-                        "Player tick error %s: %s",
-                        row["user_id"],
-                        e,
-                    )
-
-        except Exception as e:
-            logging.exception(
-                "Game tick error: %s",
-                e,
-            )
-
-        await asyncio.sleep(1800)
-
-
 async def process_player_tick(user_id):
 
     city = await get_city(user_id)
@@ -3240,121 +3541,236 @@ async def process_player_tick(user_id):
 
     city = await get_city(user_id)
 
+    resources = await get_resources(user_id)
+
+    if not resources:
+        return
+
+    population = city["population"]
+
+    # ---------------------------------------------
+    # Resource consumption
+    # ---------------------------------------------
+
     food_need = max(
         1,
-        city["population"] // 50
+        population // 50,
     )
 
     water_need = max(
         1,
-        city["population"] // 45
+        population // 45,
     )
 
     energy_need = max(
         1,
-        city["population"] // 60
+        population // 60,
     )
+
+    food_available = resources["food"] >= food_need
+    water_available = resources["water"] >= water_need
+    energy_available = resources["energy"] >= energy_need
 
     async with db_pool.acquire() as conn:
 
-        await conn.execute("""
+        await conn.execute(
+            """
             UPDATE resources
             SET
                 food=GREATEST(0,food-$1),
                 water=GREATEST(0,water-$2),
                 energy=GREATEST(0,energy-$3)
             WHERE user_id=$4
-        """,
+            """,
             food_need,
             water_need,
             energy_need,
             user_id,
         )
 
-        resources = await conn.fetchrow(
-            "SELECT * FROM resources WHERE user_id=$1",
-            user_id,
-        )
+        # ---------------------------------------------
+        # Citizen satisfaction
+        # ---------------------------------------------
 
         satisfaction_change = 0
 
-        if resources["food"] <= 0:
-            satisfaction_change -= 5
+        if not food_available:
+            satisfaction_change -= 6
 
-        if resources["water"] <= 0:
-            satisfaction_change -= 5
+        if not water_available:
+            satisfaction_change -= 7
 
-        if resources["energy"] <= 0:
-            satisfaction_change -= 4
+        if not energy_available:
+            satisfaction_change -= 6
 
-        population = city["population"]
+        # Housing
+        if population > city["housing_capacity"]:
+            shortage = population - city["housing_capacity"]
 
-        if city["satisfaction"] >= 80:
-            population_change = random.randint(1, 5)
-        elif city["satisfaction"] >= 60:
+            satisfaction_change -= min(
+                8,
+                max(1, shortage // 30),
+            )
+
+        # Unemployment
+        jobs = city["jobs"]
+
+        if population > jobs:
+            unemployment = population - jobs
+
+            satisfaction_change -= min(
+                8,
+                max(1, unemployment // 40),
+            )
+
+        # Tax pressure
+        if city["tax_rate"] > 15:
+            satisfaction_change -= min(
+                5,
+                (city["tax_rate"] - 15) // 2,
+            )
+
+        # Strong services
+        if city["security"] >= 60:
+            satisfaction_change += 1
+
+        if city["health"] >= 60:
+            satisfaction_change += 1
+
+        if city["recreation"] >= 60:
+            satisfaction_change += 1
+
+        if city["education"] >= 60:
+            satisfaction_change += 1
+
+        if city["infrastructure"] >= 60:
+            satisfaction_change += 1
+
+        # ---------------------------------------------
+        # Population growth
+        # ---------------------------------------------
+
+        population_change = 0
+
+        satisfaction = city["satisfaction"]
+
+        if satisfaction >= 90:
+            population_change = random.randint(3, 7)
+
+        elif satisfaction >= 80:
+            population_change = random.randint(2, 5)
+
+        elif satisfaction >= 70:
+            population_change = random.randint(1, 3)
+
+        elif satisfaction >= 60:
             population_change = random.randint(0, 2)
-        elif city["satisfaction"] >= 40:
+
+        elif satisfaction >= 45:
             population_change = random.randint(-1, 1)
+
+        elif satisfaction >= 30:
+            population_change = random.randint(-3, 0)
+
         else:
-            population_change = random.randint(-5, 0)
+            population_change = random.randint(-6, -1)
+
+        # ---------------------------------------------
+        # Housing pressure
+        # ---------------------------------------------
+
+        if population >= city["housing_capacity"]:
+            population_change -= random.randint(1, 3)
+
+        # ---------------------------------------------
+        # Unemployment pressure
+        # ---------------------------------------------
+
+        if population >jobs * 1.2:
+            population_change -= random.randint(1, 2)
+
+        # ---------------------------------------------
+        # High satisfaction migration
+        # ---------------------------------------------
+
+        if satisfaction >= 85:
+            population_change += random.randint(1, 3)
+
+        # ---------------------------------------------
+        # Very low satisfaction migration
+        # ---------------------------------------------
+
+        if satisfaction < 30:
+            population_change -= random.randint(1, 3)
 
         new_population = max(
             50,
-            population + population_change
+            population + population_change,
         )
 
-        # Migration effect
-        if city["satisfaction"] >= 85:
-            new_population += random.randint(1, 3)
-
-        elif city["satisfaction"] < 30:
-            new_population = max(
-                50,
-                new_population - random.randint(1, 3)
-            )
+        # ---------------------------------------------
+        # City level progression
+        # ---------------------------------------------
 
         level = city["city_level"]
+
         required_population = level * 250
 
         if (
             new_population >= required_population
-            and city["satisfaction"] >= 65
+            and satisfaction >= 65
             and level < MAX_LEVEL
         ):
             level += 1
 
-            await conn.execute("""
+            await conn.execute(
+                """
                 INSERT INTO news(user_id,text)
                 VALUES($1,$2)
-            """,
+                """,
                 user_id,
                 f"🎉 شهر به سطح {level} رسید!",
             )
 
-        await conn.execute("""
+        # ---------------------------------------------
+        # Apply changes
+        # ---------------------------------------------
+
+        new_satisfaction = clamp(
+            satisfaction + satisfaction_change,
+            0,
+            100,
+        )
+
+        await conn.execute(
+            """
             UPDATE cities
             SET
                 population=$1,
                 city_level=$2,
-                satisfaction=GREATEST(
-                    0,
-                    LEAST(
-                        100,
-                        satisfaction+$3
-                    )
-                ),
+                satisfaction=$3,
                 last_tick=NOW()
             WHERE user_id=$4
-        """,
+            """,
             new_population,
             level,
-            satisfaction_change,
+            new_satisfaction,
             user_id,
         )
+
+    # ---------------------------------------------
+    # Income
+    # ---------------------------------------------
+
+    await recalculate_city(user_id)
 
     await collect_income(user_id)
 
     city = await get_city(user_id)
+
+    # ---------------------------------------------
+    # Crisis generation
+    # ---------------------------------------------
 
     active = await get_active_crisis(user_id)
 
@@ -3370,7 +3786,7 @@ async def process_player_tick(user_id):
 
         danger += max(
             0,
-            60 - city["satisfaction"]
+            60 - city["satisfaction"],
         ) // 5
 
         danger = clamp(
@@ -3386,7 +3802,9 @@ async def process_player_tick(user_id):
             if crisis:
 
                 try:
-                    data = CRISES[crisis["crisis_type"]]
+                    data = CRISES[
+                        crisis["crisis_type"]
+                    ]
 
                     await bot.send_message(
                         user_id,
@@ -3397,13 +3815,18 @@ async def process_player_tick(user_id):
 
 یک بحران جدید در شهر اتفاق افتاده!
 
-🔥 شدت: {crisis['severity']} / 100
+🔥 شدت: {crisis['severity']} از 100
 
 سریع وارد بخش «🚨 بحران‌ها» شو.
 """,
                     )
+
                 except Exception:
                     pass
+
+    # ---------------------------------------------
+    # Weekly score
+    # ---------------------------------------------
 
     await update_weekly_score(user_id)
 
@@ -3465,63 +3888,96 @@ async def profile_command(message: Message):
 
 @dp.message(Command("friends"))
 async def friends_command(message: Message):
+
     user_id = await ensure_player(message)
 
     async with db_pool.acquire() as conn:
-        rows = await conn.fetch("""
-            SELECT p.user_id, p.first_name, c.city_name
+
+        rows = await conn.fetch(
+            """
+            SELECT
+                p.user_id,
+                p.first_name,
+                c.city_name
             FROM friendships f
-            JOIN players p ON p.user_id=f.friend_id
-            JOIN cities c ON c.user_id=p.user_id
+            JOIN players p
+                ON p.user_id=f.friend_id
+            JOIN cities c
+                ON c.user_id=p.user_id
             WHERE f.user_id=$1
             LIMIT 20
-        """, user_id)
+            """,
+            user_id,
+        )
 
-        requests = await conn.fetch("""
-            SELECT p.first_name, p.user_id
+        requests = await conn.fetch(
+            """
+            SELECT
+                p.first_name,
+                p.user_id
             FROM friend_requests fr
-            JOIN players p ON p.user_id=fr.sender_id
+            JOIN players p
+                ON p.user_id=fr.sender_id
             WHERE fr.receiver_id=$1
               AND fr.status='pending'
             LIMIT 10
-        """, user_id)
+            """,
+            user_id,
+        )
 
     if rows:
-        friends_text = "\n".join(
-            f"👤 {r['first_name']} — {r['city_name']}\n"
-            f"ID: <code>{r['user_id']}</code>"
-            for r in rows
+
+        friends_text = "\n\n".join(
+            (
+                f"👤 {row['first_name']}\n"
+                f"🏙️ {row['city_name']}\n"
+                f"🆔 شناسه: {row['user_id']}"
+            )
+            for row in rows
         )
+
     else:
-        friends_text = "هنوز دوستی نداری."
+
+        friends_text = (
+            "هنوز دوستی نداری."
+        )
 
     if requests:
-        request_text = "\n".join(
-            f"📨 {r['first_name']} — <code>{r['user_id']}</code>"
-            for r in requests
+
+        request_text = "\n\n".join(
+            (
+                f"📨 {row['first_name']}\n"
+                f"🆔 شناسه: {row['user_id']}"
+            )
+            for row in requests
         )
+
     else:
-        request_text = "درخواست جدیدی نداری."
+
+        request_text = (
+            "درخواست جدیدی نداری."
+        )
 
     await message.answer(
         f"""
 🤝 <b>دوستان من</b>
 
-👥 دوستان:
+👥 <b>دوستان</b>
 
 {friends_text}
 
 ━━━━━━━━━━━━
 
-📨 درخواست‌ها:
+📨 <b>درخواست‌ها</b>
 
 {request_text}
+
+━━━━━━━━━━━━
 
 برای مدیریت درخواست‌ها وارد بخش اجتماعی شو.
 """,
         reply_markup=main_keyboard(),
     )
-
 
 # =========================================================
 # CITY NAME

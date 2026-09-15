@@ -1970,7 +1970,7 @@ async def accept_friend(callback: CallbackQuery):
             sender_id,
             "🎉 درخواست دوستی تو قبول شد!"
         )
-    exceptException:
+except Exception:
         pass
 
     await callback.message.edit_text(

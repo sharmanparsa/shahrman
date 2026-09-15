@@ -1823,7 +1823,8 @@ async def add_friend(message: Message):
         """, user_id, receiver_id)
 
         if exists:await message.answer("✅ این بازیکن از قبل دوست توست.")
-            return
+           
+        return
 
         await conn.execute("""
             INSERT INTO friend_requests(sender_id, receiver_id)

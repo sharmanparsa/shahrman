@@ -402,6 +402,20 @@ MARKET_RESOURCES = {
     "equipment": "🧰 تجهیزات",
 }
 
+# نام‌های فارسی برای استفاده راحت‌تر در بازار
+MARKET_RESOURCE_ALIASES = {
+    "غذا": "food",
+    "🍞 غذا": "food",
+    "مصالح": "materials",
+    "🧱 مصالح": "materials",
+    "انرژی": "energy",
+    "⚡ انرژی": "energy",
+    "آب": "water",
+    "💧 آب": "water",
+    "تجهیزات": "equipment",
+    "🧰 تجهیزات": "equipment",
+}
+
 
 # =========================================================
 # GROUP CHALLENGES
@@ -3574,7 +3588,7 @@ async def groups_callback(
             "برای ساخت گروه:\n"
             "<code>/creategroup نام گروه</code>\n\n"
             "برای ورود:\n"
-            "<code>/joingroup GROUP_ID</code>"
+            "<code>/joingroup شناسه_گروه</code>"
         )
 
     else:
@@ -3604,6 +3618,16 @@ async def groups_callback(
             inline_keyboard=[
                 [
                     InlineKeyboardButton(
+                        text="➕ ساخت گروه",
+                        callback_data="group_create_help",
+                    ),
+                    InlineKeyboardButton(
+                        text="🚪 ورود به گروه",
+                        callback_data="group_join_help",
+                    ),
+                ],
+                [
+                    InlineKeyboardButton(
                         text="🏆 چالش‌های گروهی",
                         callback_data="group_challenges",
                     )
@@ -3620,6 +3644,26 @@ async def groups_callback(
 
 
 # =========================================================
+@dp.callback_query(F.data == "group_create_help")
+async def group_create_help(callback: CallbackQuery):
+    await callback.answer()
+    await callback.message.answer(
+        "➕ <b>ساخت گروه</b>\n\n"
+        "نام گروهت را انتخاب کن و این دستور را بفرست:\n"
+        "<code>/creategroup نام گروه</code>"
+    )
+
+
+@dp.callback_query(F.data == "group_join_help")
+async def group_join_help(callback: CallbackQuery):
+    await callback.answer()
+    await callback.message.answer(
+        "🚪 <b>ورود به گروه</b>\n\n"
+        "شناسه گروه را وارد کن و این دستور را بفرست:\n"
+        "<code>/joingroup شناسه_گروه</code>"
+    )
+
+
 # GROUP CHALLENGES
 # =========================================================
 
@@ -3951,7 +3995,7 @@ async def market_callback(
             "🏪 <b>بازار شهر</b>\n\n"
             "بازار فعلاً خالی است.\n\n"
             "برای فروش منابع:\n"
-            "<code>/sell food 100 50</code>\n\n"
+            "<code>/sell غذا 100 50</code>\n\n"
             "یعنی ۱۰۰ غذا با قیمت کل ۵۰ سکه."
         )
 
@@ -3967,13 +4011,9 @@ async def market_callback(
             )
 
             lines.append(
-                f"🆔 پیشنهاد: {offer['id']}\n"
-                f"{resource_name} × "
-                f"{offer['amount']:,}\n"
-                f"💰 قیمت کل: "
-                f"{offer['price']:,}\n"
-                f"👤 فروشنده: "
-                f"{safe_text(offer['first_name'])}"
+                f"📦 {resource_name} × {offer['amount']:,}\n"
+                f"💰 قیمت کل: {offer['price']:,} سکه\n"
+                f"👤 فروشنده: {safe_text(offer['first_name'])}"
             )
 
         text = "\n\n".join(lines)
@@ -3981,16 +4021,21 @@ async def market_callback(
     text += (
         "\n\n━━━━━━━━━━━━\n\n"
         "🛒 خرید:\n"
-        "<code>/buy OFFER_ID</code>\n\n"
+        "<code>/buy شناسه_پیشنهاد</code>\n\n"
         "📤 فروش:\n"
-        "<code>/sell RESOURCE AMOUNT PRICE</code>\n\n"
+        "<code>/sell منبع مقدار قیمت</code>\n\n"
         "منابع قابل معامله:\n"
-        "food | materials | energy | water | equipment"
+        "غذا | مصالح | انرژی | آب | تجهیزات"
     )
+
+    market_buttons = [
+        [InlineKeyboardButton(text="🔄 تازه‌سازی بازار", callback_data="market")],
+        [InlineKeyboardButton(text="🔙 بازگشت", callback_data="menu")],
+    ]
 
     await callback.message.edit_text(
         text,
-        reply_markup=back_keyboard(),
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=market_buttons),
     )
 
 
@@ -4003,11 +4048,14 @@ async def sell_command(message: Message):
     if len(parts) != 4:
         await message.answer(
             "❌ مثال:\n"
-            "<code>/sell food 100 50</code>"
+            "<code>/sell غذا 100 50</code>"
         )
         return
 
-    resource_type = parts[1].lower()
+    resource_type = parts[1].strip().lower()
+    resource_type = MARKET_RESOURCE_ALIASES.get(
+        resource_type, resource_type
+    )
 
     if resource_type not in MARKET_RESOURCES:
         await message.answer(
@@ -5663,10 +5711,10 @@ async def commands_command(
         "<code>/help PLAYER_ID COINS FOOD MATERIALS</code>\n\n"
         "👥 <b>گروه:</b>\n"
         "<code>/creategroup نام گروه</code>\n"
-        "<code>/joingroup GROUP_ID</code>\n\n"
+        "<code>/joingroup شناسه_گروه</code>\n\n"
         "🏪 <b>بازار:</b>\n"
-        "<code>/sell food 100 50</code>\n"
-        "<code>/buy OFFER_ID</code>\n\n"
+        "<code>/sell غذا 100 50</code>\n"
+        "<code>/buy شناسه_پیشنهاد</code>\n\n"
         "برای بقیه امکانات از منوی اصلی استفاده کن.",
         reply_markup=main_keyboard(),
     )

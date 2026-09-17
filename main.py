@@ -15,7 +15,9 @@ from aiogram.types import (
     CallbackQuery,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
+    KeyboardButton,
     Message,
+    ReplyKeyboardMarkup,
 )
 from dotenv import load_dotenv
 
@@ -70,6 +72,193 @@ START_ECONOMY = 50
 
 MAX_SATISFACTION = 100
 MAX_LEVEL = 30
+
+
+# =========================================================
+# NATURAL DISASTER ENGINE
+# =========================================================
+
+async def generate_daily_disasters(user_id):
+    today = now_utc().date()
+
+    async with db_pool.acquire() as conn:
+        async with conn.transaction():
+            day = await conn.fetchrow(
+                """
+                SELECT disaster_count
+                FROM natural_disaster_days
+                WHERE user_id=$1 AND disaster_date=$2
+                FOR UPDATE
+                """,
+                user_id, today,
+            )
+
+            if day:
+                return
+
+            count = random.randint(1, 4)
+            await conn.execute(
+                """
+                INSERT INTO natural_disaster_days(user_id, disaster_date, disaster_count)
+                VALUES($1,$2,$3)
+                """,
+                user_id, today, count,
+            )
+
+            choices = random.sample(NATURAL_DISASTERS, count)
+
+            buildings = await conn.fetch(
+                """
+                SELECT building_type, level
+                FROM buildings
+                WHERE user_id=$1 AND level>0
+                """,
+                user_id,
+            )
+
+            for emoji_name, disaster_name in choices:
+                building_type = None
+                damage = 0
+
+                if buildings:
+                    building_type = random.choice(buildings)["building_type"]
+                    damage = random.randint(10, 500)
+
+                row = await conn.fetchrow(
+                    """
+                    INSERT INTO natural_disasters(
+                        user_id, disaster_date, disaster_name,
+                        building_type, damage_amount
+                    )
+                    VALUES($1,$2,$3,$4,$5)
+                    RETURNING id
+                    """,
+                    user_id, today, disaster_name, building_type, damage,
+                )
+
+                try:
+                    if building_type:
+                        building_name = BUILDINGS.get(building_type, {}).get(
+                            "name", building_type
+                        )
+                        keyboard = InlineKeyboardMarkup(
+                            inline_keyboard=[
+                                [
+                                    InlineKeyboardButton(
+                                        text=f"🔧 تعمیر فوری ({damage:,} 🪙)",
+                                        callback_data=f"repair_damage:{row['id']}",
+                                    )
+                                ],
+                                [
+                                    InlineKeyboardButton(
+                                        text="⏳ بعداً پرداخت می‌کنم",
+                                        callback_data=f"later_damage:{row['id']}",
+                                    )
+                                ],
+                            ]
+                        )
+                        text = (
+                            f"🚨 <b>هشدار بلای طبیعی!</b>\n\n"
+                            f"{emoji_name} بر سر شهرتون اومد، فوراً اقدام لازم رو انجام بدید.\n\n"
+                            f"🏢 ساختمان آسیب‌دیده: {building_name}\n"
+                            f"💰 هزینه اولیه تعمیر: {damage:,} سکه\n\n"
+                            "⚠️ اگر تعمیر رو عقب بندازید، هر ساعت ۱۰ سکه به هزینه اضافه میشه."
+                        )
+                    else:
+                        keyboard = InlineKeyboardMarkup(
+                            inline_keyboard=[
+                                [InlineKeyboardButton(text="🏙️ ورود به شهر", callback_data="city")],
+                                [InlineKeyboardButton(text="🔙 منو", callback_data="menu")],
+                            ]
+                        )
+                        text = (
+                            f"🚨 <b>هشدار بلای طبیعی!</b>\n\n"
+                            f"{emoji_name} بر سر شهرتون اومد، فوراً اقدام لازم رو انجام بدید.\n\n"
+                            "🏙️ این حادثه فعلاً به ساختمان مشخصی آسیب نزده است."
+                        )
+
+                    await bot.send_message(user_id, text, reply_markup=keyboard)
+                except Exception:
+                    logging.exception("Could not notify user %s about natural disaster", user_id)
+
+
+@dp.callback_query(F.data.startswith("repair_damage:"))
+async def repair_damage_callback(callback: CallbackQuery):
+    user_id = callback.from_user.id
+    await ensure_callback_player(user_id)
+
+    try:
+        damage_id = int(callback.data.split(":", 1)[1])
+    except ValueError:
+        await callback.answer("شناسه خسارت نامعتبر است.", show_alert=True)
+        return
+
+    async with db_pool.acquire() as conn:
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                """
+                SELECT id, building_type, damage_amount, created_at
+                FROM natural_disasters
+                WHERE id=$1 AND user_id=$2 AND repaired=FALSE
+                FOR UPDATE
+                """,
+                damage_id, user_id,
+            )
+
+            if not row:
+                await callback.answer("این خسارت قبلاً تعمیر شده است.", show_alert=True)
+                return
+
+            cost = natural_damage_cost(row["damage_amount"], row["created_at"])
+            resources = await conn.fetchrow(
+                "SELECT coins FROM resources WHERE user_id=$1 FOR UPDATE",
+                user_id,
+            )
+
+            if not resources or resources["coins"] < cost:
+                await callback.answer(
+                    f"سکه کافی نیست. هزینه فعلی تعمیر {cost:,} سکه است.",
+                    show_alert=True,
+                )
+                return
+
+            await conn.execute(
+                "UPDATE resources SET coins=coins-$1 WHERE user_id=$2",
+                cost, user_id,
+            )
+            await conn.execute(
+                """
+                UPDATE natural_disasters
+                SET repaired=TRUE, repaired_at=NOW()
+                WHERE id=$1
+                """,
+                damage_id,
+            )
+
+    building_name = BUILDINGS.get(row["building_type"], {}).get(
+        "name", row["building_type"]
+    )
+    await callback.answer("تعمیر با موفقیت انجام شد! 🔧")
+    await callback.message.edit_text(
+        f"✅ <b>تعمیر انجام شد</b>\n\n"
+        f"🏢 ساختمان: {building_name}\n"
+        f"💰 هزینه پرداخت‌شده: {cost:,} سکه",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🏗️ ساختمان‌ها", callback_data="buildings")],
+            [InlineKeyboardButton(text="🔙 منو", callback_data="menu")],
+        ]),
+    )
+
+
+@dp.callback_query(F.data.startswith("later_damage:"))
+async def later_damage_callback(callback: CallbackQuery):
+    await callback.answer("خسارت باقی ماند؛ هر ساعت ۱۰ سکه به هزینه تعمیر اضافه می‌شود.")
+    await callback.message.edit_reply_markup(
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🏗️ مشاهده ساختمان‌های آسیب‌دیده", callback_data="buildings")],
+            [InlineKeyboardButton(text="🔙 منو", callback_data="menu")],
+        ])
+    )
 
 
 # =========================================================
@@ -169,6 +358,60 @@ BUILDINGS = {
         },
         "maintenance": 20,
         "description": "تفریح، اشتغال و اقتصاد.",
+    },
+    "industrial": {
+        "name": "🏭 منطقه صنعتی",
+        "cost": 800,
+        "material": 250,
+        "base_effect": {
+            "economy": 15,
+            "jobs": 30,
+        },
+        "maintenance": 16,
+        "description": "افزایش درآمد ساعتی، اشتغال و اقتصاد شهر.",
+    },
+    "commercial_center": {
+        "name": "🏬 مرکز تجاری",
+        "cost": 700,
+        "material": 220,
+        "base_effect": {
+            "economy": 12,
+            "jobs": 20,
+        },
+        "maintenance": 12,
+        "description": "افزایش درآمد ساعتی، تجارت و اشتغال.",
+    },
+    "market_center": {
+        "name": "🛒 بازار مرکزی",
+        "cost": 450,
+        "material": 140,
+        "base_effect": {
+            "economy": 7,
+            "jobs": 10,
+        },
+        "maintenance": 7,
+        "description": "افزایش درآمد تجارت شهر.",
+    },
+    "bank": {
+        "name": "🏦 بانک",
+        "cost": 700,
+        "material": 180,
+        "base_effect": {
+            "economy": 10,
+        },
+        "maintenance": 10,
+        "description": "تقویت اقتصاد و درآمد مالی شهر.",
+    },
+    "port": {
+        "name": "⚓ بندر تجاری",
+        "cost": 1000,
+        "material": 300,
+        "base_effect": {
+            "economy": 18,
+            "jobs": 25,
+        },
+        "maintenance": 20,
+        "description": "افزایش درآمد تجارت و اشتغال شهر.",
     },
     "recycling": {
         "name": "♻️ مرکز بازیافت",
@@ -379,6 +622,34 @@ MARKET_RESOURCES = {
 }
 
 
+@dp.callback_query(F.data == "group_create_help")
+async def group_create_help_callback(callback: CallbackQuery):
+    await callback.answer()
+    await callback.message.edit_text(
+        "➕ <b>ساخت گروه</b>\n\n"
+        "نام گروهت را بعد از دستور بنویس.\n"
+        "مثال: <code>/creategroup شهرسازان</code>",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="👥 گروه‌ها", callback_data="groups")],
+            [InlineKeyboardButton(text="🔙 منو", callback_data="menu")],
+        ]),
+    )
+
+
+@dp.callback_query(F.data == "group_join_help")
+async def group_join_help_callback(callback: CallbackQuery):
+    await callback.answer()
+    await callback.message.edit_text(
+        "🚪 <b>ورود به گروه</b>\n\n"
+        "شناسه گروه را بعد از دستور بنویس.\n"
+        "مثال: <code>/joingroup 123</code>",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="👥 گروه‌ها", callback_data="groups")],
+            [InlineKeyboardButton(text="🔙 منو", callback_data="menu")],
+        ]),
+    )
+
+
 # =========================================================
 # GROUP CHALLENGES
 # =========================================================
@@ -400,6 +671,68 @@ CHALLENGES = {
         "reward": 700,
     },
 }
+
+
+# =========================================================
+# ECONOMIC INCOME
+# =========================================================
+
+# درآمد پایه هر شهر: حداقل ۵۰ سکه در ساعت
+BASE_HOURLY_INCOME = 50
+
+# درآمد اضافه هر سطح از ساختمان‌های اقتصادی
+ECONOMIC_BUILDING_INCOME = {
+    "power": 20,
+    "shopping": 40,
+    "stadium": 30,
+    "industrial": 50,
+    "commercial_center": 40,
+    "market_center": 25,
+    "bank": 35,
+    "port": 60,
+}
+
+
+# =========================================================
+# NATURAL DISASTERS
+# =========================================================
+
+NATURAL_DISASTERS = [
+    ("🌊 سیل", "سیل"),
+    ("🌪️ طوفان", "طوفان"),
+    ("❄️ کولاک شدید", "کولاک شدید"),
+    ("🔥 آتش‌سوزی گسترده", "آتش‌سوزی گسترده"),
+    ("🌧️ بارندگی شدید", "بارندگی شدید"),
+    ("🌨️ برف سنگین", "برف سنگین"),
+    ("🌡️ موج گرما", "موج گرما"),
+    ("⚡ طوفان الکتریکی", "طوفان الکتریکی"),
+    ("🌫️ آلودگی شدید", "آلودگی شدید"),
+]
+
+
+def get_hourly_income_from_buildings(rows):
+    income = BASE_HOURLY_INCOME
+    for row in rows:
+        income += ECONOMIC_BUILDING_INCOME.get(
+            row["building_type"], 0
+        ) * max(0, int(row["level"]))
+    return max(BASE_HOURLY_INCOME, income)
+
+
+def natural_damage_cost(base_damage, created_at):
+    if not created_at:
+        return int(base_damage)
+    elapsed = now_utc() - created_at
+    hours = max(0, int(elapsed.total_seconds() // 3600))
+    return int(base_damage) + (hours * 10)
+
+
+def start_keyboard():
+    return ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="🚀 شروع بازی")]],
+        resize_keyboard=True,
+        is_persistent=True,
+    )
 
 
 # =========================================================
@@ -961,6 +1294,42 @@ async def init_db():
 
         await conn.execute(
             """
+            CREATE TABLE IF NOT EXISTS natural_disasters (
+                id SERIAL PRIMARY KEY,
+                user_id BIGINT REFERENCES players(user_id) ON DELETE CASCADE,
+                disaster_date DATE NOT NULL,
+                disaster_name TEXT NOT NULL,
+                building_type TEXT,
+                damage_amount INTEGER DEFAULT 0,
+                repaired BOOLEAN DEFAULT FALSE,
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                repaired_at TIMESTAMPTZ
+            )
+            """
+        )
+
+        await conn.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS
+            natural_disaster_daily_idx
+            ON natural_disasters(user_id, disaster_date, id)
+            """
+        )
+
+        await conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS natural_disaster_days (
+                user_id BIGINT REFERENCES players(user_id) ON DELETE CASCADE,
+                disaster_date DATE NOT NULL,
+                disaster_count INTEGER NOT NULL,
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                PRIMARY KEY(user_id, disaster_date)
+            )
+            """
+        )
+
+        await conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS group_challenges (
                 id SERIAL PRIMARY KEY,
                 group_id INTEGER
@@ -1328,8 +1697,7 @@ async def collect_income(user_id):
 
             city = await conn.fetchrow(
                 """
-                SELECT *
-                FROM cities
+                SELECT * FROM cities
                 WHERE user_id=$1
                 FOR UPDATE
                 """,
@@ -1339,41 +1707,14 @@ async def collect_income(user_id):
             if not city:
                 return 0
 
-            last_income = city["last_income"]
-
-            if last_income is None:
-                last_income = now_utc()
-
+            last_income = city["last_income"] or now_utc()
             elapsed = now_utc() - last_income
 
             if elapsed < timedelta(minutes=25):
                 return 0
 
-            periods = max(
-                1,
-                int(
-                    elapsed.total_seconds()
-                    // 1800
-                ),
-            )
-
-            periods = min(periods, 8)
-
-            tax_income = int(
-                city["population"]
-                * city["tax_rate"]
-                * max(city["satisfaction"], 20)
-                / 10000
-            )
-
-            economic_income = city["economy"] * 2
-
-            base_income = max(
-                10,
-                tax_income + economic_income,
-            )
-
-            maintenance = 0
+            periods = max(1, int(elapsed.total_seconds() // 1800))
+            periods = min(periods, 48)
 
             rows = await conn.fetch(
                 """
@@ -1384,28 +1725,23 @@ async def collect_income(user_id):
                 user_id,
             )
 
+            hourly_gross = get_hourly_income_from_buildings(rows)
+
+            maintenance_hourly = 0
             for row in rows:
-                data = BUILDINGS.get(
-                    row["building_type"]
-                )
-
+                data = BUILDINGS.get(row["building_type"])
                 if data:
-                    maintenance += (
-                        data["maintenance"]
-                        * row["level"]
-                    )
+                    maintenance_hourly += data["maintenance"] * max(0, int(row["level"]))
 
-            final_income = (
-                base_income - maintenance
-            ) * periods
+            # درآمد خالص ساعتی هیچ‌وقت کمتر از ۵۰ سکه نمی‌شود.
+            hourly_net = max(BASE_HOURLY_INCOME, hourly_gross - maintenance_hourly)
+            half_hour_income = max(25, hourly_net // 2)
+            final_income = half_hour_income * periods
 
             await conn.execute(
                 """
                 UPDATE resources
-                SET coins=GREATEST(
-                    0,
-                    coins+$1
-                )
+                SET coins=GREATEST(0, coins+$1)
                 WHERE user_id=$2
                 """,
                 final_income,
@@ -1414,8 +1750,7 @@ async def collect_income(user_id):
 
             await conn.execute(
                 """
-                UPDATE cities
-                SET last_income=NOW()
+                UPDATE cities SET last_income=NOW()
                 WHERE user_id=$1
                 """,
                 user_id,
@@ -1761,6 +2096,13 @@ async def start_handler(message: Message):
         reply_markup=main_keyboard(),
     )
 
+    await message.answer("از دکمه پایین صفحه هم می‌تونی وارد بازی بشی 🚀", reply_markup=start_keyboard())
+
+
+@dp.message(F.text == "🚀 شروع بازی")
+async def start_button_handler(message: Message):
+    await start_handler(message)
+
 
 # =========================================================
 # MENU
@@ -1856,20 +2198,62 @@ async def mayor_callback(callback: CallbackQuery):
 # =========================================================
 
 @dp.callback_query(F.data == "buildings")
-async def buildings_callback(
-    callback: CallbackQuery
-):
+async def buildings_callback(callback: CallbackQuery):
     await callback.answer()
 
-    await ensure_callback_player(
-        callback.from_user.id
+    user_id = callback.from_user.id
+    await ensure_callback_player(user_id)
+
+    async with db_pool.acquire() as conn:
+        damages = await conn.fetch(
+            """
+            SELECT id, disaster_name, building_type, damage_amount, created_at
+            FROM natural_disasters
+            WHERE user_id=$1 AND repaired=FALSE AND building_type IS NOT NULL
+            ORDER BY created_at DESC
+            """,
+            user_id,
+        )
+
+    text = (
+        "🏗️ <b>ساختمان‌های شهر</b>\n\n"
+        "یک ساختمان را انتخاب کن تا سطح، هزینه و اثر آن را ببینی."
     )
 
+    buttons = []
+    for key, data in BUILDINGS.items():
+        buttons.append([
+            InlineKeyboardButton(
+                text=data["name"],
+                callback_data=f"building:{key}",
+            )
+        ])
+
+    if damages:
+        text += "\n\n🚨 <b>ساختمان‌های آسیب‌دیده</b>\n"
+        for damage in damages:
+            cost = natural_damage_cost(damage["damage_amount"], damage["created_at"])
+            data = BUILDINGS.get(damage["building_type"], {})
+            name = data.get("name", damage["building_type"])
+            text += (
+                f"\n{ name }\n"
+                f"🌪️ علت: {safe_text(damage['disaster_name'])}\n"
+                f"💰 هزینه تعمیر فعلی: {cost:,} سکه\n"
+            )
+            buttons.append([
+                InlineKeyboardButton(
+                    text=f"🔧 تعمیر {name}",
+                    callback_data=f"repair_damage:{damage['id']}",
+                )
+            ])
+
+    buttons.append([
+        InlineKeyboardButton(text="🔙 بازگشت", callback_data="menu")
+    ])
+
     await callback.message.edit_text(
-        "🏗️ <b>ساختمان‌های شهر</b>\n\n"
-        "یک ساختمان را انتخاب کن تا سطح، "
-        "هزینه و اثر آن را ببینی.",
-        reply_markup=building_keyboard(),
+        text,
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
     )
 
 
@@ -2124,8 +2508,16 @@ async def economy_screen(callback):
         )
         return
 
+    async with db_pool.acquire() as conn:
+        economic_rows = await conn.fetch(
+            "SELECT building_type, level FROM buildings WHERE user_id=$1",
+            user_id,
+        )
+    hourly_income = get_hourly_income_from_buildings(economic_rows)
+
     text = (
         "💰 <b>اقتصاد شهر</b>\n\n"
+        f"🪙 درآمد ساعتی: {hourly_income:,} سکه\n"
         f"📈 قدرت اقتصادی: {city['economy']}%\n\n"
         f"💵 درآمد دریافت‌شده: "
         f"{income:,} سکه\n"
@@ -3459,10 +3851,7 @@ async def groups_callback(
         text = (
             "👥 <b>گروه‌ها</b>\n\n"
             "هنوز عضو گروهی نیستی.\n\n"
-            "برای ساخت گروه:\n"
-            "<code>/creategroup نام گروه</code>\n\n"
-            "برای ورود:\n"
-            "<code>/joingroup GROUP_ID</code>"
+            "از دکمه‌های پایین برای راهنمای ساخت یا ورود به گروه استفاده کن."
         )
 
     else:
@@ -3490,6 +3879,16 @@ async def groups_callback(
         text,
         reply_markup=InlineKeyboardMarkup(
             inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="➕ ساخت گروه",
+                        callback_data="group_create_help",
+                    ),
+                    InlineKeyboardButton(
+                        text="🚪 ورود به گروه",
+                        callback_data="group_join_help",
+                    ),
+                ],
                 [
                     InlineKeyboardButton(
                         text="🏆 چالش‌های گروهی",
@@ -3810,24 +4209,18 @@ async def create_challenge_callback(
 # =========================================================
 
 @dp.callback_query(F.data == "market")
-async def market_callback(
-    callback: CallbackQuery
-):
+async def market_callback(callback: CallbackQuery):
     await callback.answer()
 
     user_id = callback.from_user.id
-
     await ensure_callback_player(user_id)
 
     async with db_pool.acquire() as conn:
         offers = await conn.fetch(
             """
-            SELECT
-                mo.*,
-                p.first_name
+            SELECT mo.*, p.first_name
             FROM market_offers mo
-            JOIN players p
-                ON p.user_id=mo.seller_id
+            JOIN players p ON p.user_id=mo.seller_id
             WHERE mo.status='active'
             ORDER BY mo.created_at DESC
             LIMIT 10
@@ -3837,48 +4230,107 @@ async def market_callback(
     if not offers:
         text = (
             "🏪 <b>بازار شهر</b>\n\n"
-            "بازار فعلاً خالی است.\n\n"
-            "برای فروش منابع:\n"
-            "<code>/sell food 100 50</code>\n\n"
-            "یعنی ۱۰۰ غذا با قیمت کل ۵۰ سکه."
+            "بازار فعلاً پیشنهادی ندارد.\n\n"
+            "برای فروش می‌توانی از دستور فروش استفاده کنی؛ خرید پیشنهادها با دکمه انجام می‌شود."
         )
-
     else:
-        lines = [
-            "🏪 <b>بازار شهر</b>\n"
-        ]
-
+        lines = ["🏪 <b>بازار شهر</b>", "", "برای خرید، روی دکمه پیشنهاد موردنظر بزن:"]
         for offer in offers:
-            resource_name = MARKET_RESOURCES.get(
-                offer["resource_type"],
-                "منبع",
-            )
-
+            resource_name = MARKET_RESOURCES.get(offer["resource_type"], "منبع")
             lines.append(
-                f"🆔 پیشنهاد: {offer['id']}\n"
-                f"{resource_name} × "
-                f"{offer['amount']:,}\n"
-                f"💰 قیمت کل: "
-                f"{offer['price']:,}\n"
-                f"👤 فروشنده: "
-                f"{safe_text(offer['first_name'])}"
+                f"\n📦 {resource_name} × {offer['amount']:,} | 💰 {offer['price']:,} سکه\n"
+                f"👤 فروشنده: {safe_text(offer['first_name'])}"
             )
+        text = "\n".join(lines)
 
-        text = "\n\n".join(lines)
+    buttons = []
+    for offer in offers:
+        resource_name = MARKET_RESOURCES.get(offer["resource_type"], "منبع")
+        buttons.append([
+            InlineKeyboardButton(
+                text=f"🛒 خرید {resource_name} — {offer['price']:,} سکه",
+                callback_data=f"market_buy:{offer['id']}",
+            )
+        ])
 
-    text += (
-        "\n\n━━━━━━━━━━━━\n\n"
-        "🛒 خرید:\n"
-        "<code>/buy OFFER_ID</code>\n\n"
-        "📤 فروش:\n"
-        "<code>/sell RESOURCE AMOUNT PRICE</code>\n\n"
-        "منابع قابل معامله:\n"
-        "food | materials | energy | water | equipment"
-    )
+    buttons.extend([
+        [InlineKeyboardButton(text="📤 راهنمای فروش", callback_data="market_sell_help")],
+        [InlineKeyboardButton(text="🔄 تازه‌سازی بازار", callback_data="market")],
+        [InlineKeyboardButton(text="🔙 بازگشت", callback_data="menu")],
+    ])
 
     await callback.message.edit_text(
         text,
-        reply_markup=back_keyboard(),
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
+    )
+
+
+@dp.callback_query(F.data.startswith("market_buy:"))
+async def market_buy_callback(callback: CallbackQuery):
+    user_id = callback.from_user.id
+    await ensure_callback_player(user_id)
+
+    try:
+        offer_id = int(callback.data.split(":", 1)[1])
+    except ValueError:
+        await callback.answer("شناسه پیشنهاد نامعتبر است.", show_alert=True)
+        return
+
+    async with db_pool.acquire() as conn:
+        async with conn.transaction():
+            offer = await conn.fetchrow(
+                "SELECT * FROM market_offers WHERE id=$1 FOR UPDATE",
+                offer_id,
+            )
+            if not offer or offer["status"] != "active":
+                await callback.answer("این پیشنهاد دیگر فعال نیست.", show_alert=True)
+                return
+            if offer["seller_id"] == user_id:
+                await callback.answer("نمی‌توانی پیشنهاد خودت را بخری.", show_alert=True)
+                return
+
+            ids = sorted([user_id, offer["seller_id"]])
+            rows = await conn.fetch(
+                "SELECT * FROM resources WHERE user_id=ANY($1::bigint[]) ORDER BY user_id FOR UPDATE",
+                ids,
+            )
+            resource_map = {r["user_id"]: r for r in rows}
+            buyer = resource_map.get(user_id)
+            seller = resource_map.get(offer["seller_id"])
+            if not buyer or not seller:
+                await callback.answer("اطلاعات منابع پیدا نشد.", show_alert=True)
+                return
+            if buyer["coins"] < offer["price"]:
+                await callback.answer("سکه کافی نداری.", show_alert=True)
+                return
+
+            resource_type = offer["resource_type"]
+            await conn.execute("UPDATE resources SET coins=coins-$1 WHERE user_id=$2", offer["price"], user_id)
+            await conn.execute("UPDATE resources SET coins=coins+$1 WHERE user_id=$2", offer["price"], offer["seller_id"])
+            await conn.execute(
+                f"UPDATE resources SET {resource_type}={resource_type}+$1 WHERE user_id=$2",
+                offer["amount"], user_id,
+            )
+            await conn.execute("UPDATE market_offers SET status='sold' WHERE id=$1", offer_id)
+
+    await add_xp(user_id, 15)
+    await callback.answer("خرید با موفقیت انجام شد! 🛒")
+    await market_callback(callback)
+
+
+@dp.callback_query(F.data == "market_sell_help")
+async def market_sell_help_callback(callback: CallbackQuery):
+    await callback.answer()
+    await callback.message.edit_text(
+        "📤 <b>فروش در بازار</b>\n\n"
+        "برای ثبت فروش، مقدار و قیمت را مشخص کن.\n\n"
+        "مثال برای فروش ۱۰۰ واحد غذا با قیمت ۵۰ سکه: \n"
+        "<code>/sell food 100 50</code>\n\n"
+        "منابع: غذا، مصالح، انرژی، آب و تجهیزات.",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🏪 بازگشت به بازار", callback_data="market")],
+            [InlineKeyboardButton(text="🔙 منو", callback_data="menu")],
+        ]),
     )
 
 
@@ -3895,7 +4347,11 @@ async def sell_command(message: Message):
         )
         return
 
-    resource_type = parts[1].lower()
+    resource_aliases = {
+        "غذا": "food", "مصالح": "materials", "انرژی": "energy",
+        "آب": "water", "تجهیزات": "equipment",
+    }
+    resource_type = resource_aliases.get(parts[1].lower(), parts[1].lower())
 
     if resource_type not in MARKET_RESOURCES:
         await message.answer(
@@ -5263,6 +5719,12 @@ async def process_player_tick(user_id):
                     )
 
     # ---------------------------------------------------------
+    # Daily natural disasters
+    # ---------------------------------------------------------
+
+    await generate_daily_disasters(user_id)
+
+    # ---------------------------------------------------------
     # Weekly score
     # ---------------------------------------------------------
 
@@ -5571,7 +6033,7 @@ async def commands_command(
         "<code>/help PLAYER_ID COINS FOOD MATERIALS</code>\n\n"
         "👥 <b>گروه:</b>\n"
         "<code>/creategroup نام گروه</code>\n"
-        "<code>/joingroup GROUP_ID</code>\n\n"
+        "<code>/joingroup شناسه_گروه</code>\n\n"
         "🏪 <b>بازار:</b>\n"
         "<code>/sell food 100 50</code>\n"
         "<code>/buy OFFER_ID</code>\n\n"

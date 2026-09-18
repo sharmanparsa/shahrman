@@ -71,6 +71,14 @@ class TelegramGroupMessageGuard(BaseMiddleware):
                         if exists:
                             await conn.execute(
                                 """
+                                UPDATE players
+                                SET username=$2, first_name=$3
+                                WHERE user_id=$1
+                                """,
+                                user.id, user.username, user.first_name or ""
+                            )
+                            await conn.execute(
+                                """
                                 INSERT INTO telegram_group_mayors(chat_id,user_id,username,first_name,last_seen)
                                 VALUES($1,$2,$3,$4,NOW())
                                 ON CONFLICT(chat_id,user_id) DO UPDATE SET
@@ -3488,75 +3496,220 @@ async def help_command(message: Message):
 # =========================================================
 
 @dp.callback_query(F.data == "market")
-async def market_callback(
-    callback: CallbackQuery
-):
+async def market_callback(callback: CallbackQuery):
     await callback.answer()
-
     user_id = callback.from_user.id
-
     await ensure_callback_player(user_id)
 
     async with db_pool.acquire() as conn:
         offers = await conn.fetch(
             """
-            SELECT
-                mo.*,
-                p.first_name
+            SELECT mo.*, p.first_name
             FROM market_offers mo
-            JOIN players p
-                ON p.user_id=mo.seller_id
+            JOIN players p ON p.user_id=mo.seller_id
             WHERE mo.status='active'
             ORDER BY mo.created_at DESC
             LIMIT 10
             """
         )
 
+    lines = ["🏪 <b>بازار شهر</b>", "", "منابع موجود برای خرید:"]
+    keyboard = []
     if not offers:
-        text = (
-            "🏪 <b>بازار شهر</b>\n\n"
-            "بازار فعلاً خالی است.\n\n"
-            "برای فروش منابع:\n"
-            "<code>/sell food 100 50</code>\n\n"
-            "یعنی ۱۰۰ غذا با قیمت کل ۵۰ سکه."
-        )
-
+        lines += ["", "بازار فعلاً خالی است."]
     else:
-        lines = [
-            "🏪 <b>بازار شهر</b>\n"
-        ]
-
         for offer in offers:
-            resource_name = MARKET_RESOURCES.get(
-                offer["resource_type"],
-                "منبع",
-            )
-
+            resource_name = MARKET_RESOURCES.get(offer["resource_type"], "منبع")
             lines.append(
-                f"🆔 پیشنهاد: {offer['id']}\n"
-                f"{resource_name} × "
-                f"{offer['amount']:,}\n"
-                f"💰 قیمت کل: "
-                f"{offer['price']:,}\n"
-                f"👤 فروشنده: "
-                f"{safe_text(offer['first_name'])}"
+                f"\n📦 {resource_name} × {offer['amount']:,}\n"
+                f"💰 قیمت: {offer['price']:,} سکه\n"
+                f"👤 فروشنده: {safe_text(offer['first_name'])}"
             )
+            keyboard.append([
+                InlineKeyboardButton(
+                    text=f"🛒 خرید پیشنهاد {offer['id']}",
+                    callback_data=f"market_buy:{offer['id']}"
+                )
+            ])
 
-        text = "\n\n".join(lines)
-
-    text += (
-        "\n\n━━━━━━━━━━━━\n\n"
-        "🛒 خرید:\n"
-        "<code>/buy OFFER_ID</code>\n\n"
-        "📤 فروش:\n"
-        "<code>/sell RESOURCE AMOUNT PRICE</code>\n\n"
-        "منابع قابل معامله:\n"
-        "food | materials | energy | water | equipment"
-    )
+    lines += [
+        "",
+        "━━━━━━━━━━━━",
+        "برای فروش منابع، دکمه زیر را بزنید."
+    ]
+    keyboard.append([
+        InlineKeyboardButton(text="📤 فروش منابع", callback_data="market_sell")
+    ])
+    keyboard.append([
+        InlineKeyboardButton(text="🔄 به‌روزرسانی بازار", callback_data="market")
+    ])
+    keyboard.append([
+        InlineKeyboardButton(text="🔙 بازگشت", callback_data="back_main")
+    ])
 
     await callback.message.edit_text(
-        text,
-        reply_markup=back_keyboard(),
+        "\n".join(lines),
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard)
+    )
+
+
+market_state = {}
+
+
+@dp.callback_query(F.data == "market_sell")
+async def market_sell_callback(callback: CallbackQuery):
+    await callback.answer()
+    market_state[(callback.message.chat.id, callback.from_user.id)] = {"step": "resource"}
+    keyboard = [
+        [InlineKeyboardButton(text="🍞 غذا", callback_data="market_res:food")],
+        [InlineKeyboardButton(text="🧱 مصالح", callback_data="market_res:materials")],
+        [InlineKeyboardButton(text="⚡ انرژی", callback_data="market_res:energy")],
+        [InlineKeyboardButton(text="💧 آب", callback_data="market_res:water")],
+        [InlineKeyboardButton(text="🧰 تجهیزات", callback_data="market_res:equipment")],
+        [InlineKeyboardButton(text="🔙 بازگشت به بازار", callback_data="market")],
+    ]
+    await callback.message.edit_text(
+        "📤 <b>فروش منابع</b>\n\nکدام منبع را می‌خواهی بفروشی؟",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard)
+    )
+
+
+@dp.callback_query(F.data.startswith("market_res:"))
+async def market_resource_callback(callback: CallbackQuery):
+    await callback.answer()
+    resource = callback.data.split(":", 1)[1]
+    key = (callback.message.chat.id, callback.from_user.id)
+    market_state[key] = {"step": "amount", "resource": resource}
+    await callback.message.edit_text(
+        f"📤 <b>فروش {MARKET_RESOURCES[resource]}</b>\n\n"
+        "مقدار موردنظر را به صورت عدد بفرست.\n"
+        "مثلاً: <code>100</code>",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔙 بازگشت به بازار", callback_data="market")]
+        ])
+    )
+
+
+@dp.callback_query(F.data.startswith("market_buy:"))
+async def market_buy_callback(callback: CallbackQuery):
+    await callback.answer()
+    offer_id = callback.data.split(":", 1)[1]
+    try:
+        offer_id = int(offer_id)
+    except ValueError:
+        await callback.message.answer("❌ پیشنهاد نامعتبر است.")
+        return
+
+    user_id = await callback.from_user.id if False else callback.from_user.id
+    async with db_pool.acquire() as conn:
+        async with conn.transaction():
+            offer = await conn.fetchrow(
+                "SELECT * FROM market_offers WHERE id=$1 FOR UPDATE", offer_id
+            )
+            if not offer or offer["status"] != "active":
+                await callback.message.answer("❌ این پیشنهاد دیگر فعال نیست.")
+                return
+            if offer["seller_id"] == user_id:
+                await callback.message.answer("❌ نمی‌توانی پیشنهاد خودت را بخری.")
+                return
+            ids = sorted([user_id, offer["seller_id"]])
+            rows = await conn.fetch(
+                "SELECT * FROM resources WHERE user_id=ANY($1::bigint[]) ORDER BY user_id FOR UPDATE", ids
+            )
+            rm = {r["user_id"]: r for r in rows}
+            buyer, seller = rm.get(user_id), rm.get(offer["seller_id"])
+            if not buyer or not seller:
+                await callback.message.answer("❌ اطلاعات منابع پیدا نشد.")
+                return
+            if buyer["coins"] < offer["price"]:
+                await callback.message.answer("❌ سکه کافی نداری.")
+                return
+            resource = offer["resource_type"]
+            await conn.execute("UPDATE resources SET coins=coins-$1 WHERE user_id=$2", offer["price"], user_id)
+            await conn.execute("UPDATE resources SET coins=coins+$1 WHERE user_id=$2", offer["price"], offer["seller_id"])
+            await conn.execute(f"UPDATE resources SET {resource}={resource}+$1 WHERE user_id=$2", offer["amount"], user_id)
+            await conn.execute("UPDATE market_offers SET status='sold' WHERE id=$1", offer_id)
+
+    await add_xp(user_id, 15)
+    await callback.message.answer(
+        "🛒 <b>خرید با موفقیت انجام شد!</b>\n\n"
+        f"📦 {MARKET_RESOURCES[offer['resource_type']]}\n"
+        f"مقدار: {offer['amount']:,}\n"
+        f"💰 پرداخت: {offer['price']:,} سکه\n\n⭐ +15 XP"
+    )
+    await market_callback(callback)
+
+
+@dp.message(lambda m: m.chat.type == "private" and bool(m.text) and (m.chat.id, m.from_user.id) in market_state)
+async def market_text_input(message: Message):
+    key = (message.chat.id, message.from_user.id)
+    state = market_state.get(key)
+    if not state or state.get("step") != "amount":
+        return
+    try:
+        amount = int(message.text.strip())
+    except ValueError:
+        await message.answer("❌ مقدار باید عدد باشد؛ مثلاً 100")
+        return
+    if amount <= 0:
+        await message.answer("❌ مقدار باید بیشتر از صفر باشد.")
+        return
+    resource = state["resource"]
+    async with db_pool.acquire() as conn:
+        balance = await conn.fetchval(f"SELECT {resource} FROM resources WHERE user_id=$1", message.from_user.id)
+    if balance is None:
+        await message.answer("❌ منابع پیدا نشد.")
+        market_state.pop(key, None)
+        return
+    if balance < amount:
+        await message.answer(f"❌ موجودی کافی نیست. موجودی فعلی: <b>{balance:,}</b>")
+        return
+    state["amount"] = amount
+    state["step"] = "price"
+    await message.answer(
+        f"💰 قیمت کل {amount:,} واحد {MARKET_RESOURCES[resource]} را به سکه وارد کن.\n"
+        "مثلاً: <code>500</code>",
+        reply_markup=ForceReply(selective=True)
+    )
+
+
+@dp.message(lambda m: m.chat.type == "private" and bool(m.text) and (m.chat.id, m.from_user.id) in market_state)
+async def market_price_input(message: Message):
+    key = (message.chat.id, message.from_user.id)
+    state = market_state.get(key)
+    if not state or state.get("step") != "price":
+        return
+    try:
+        price = int(message.text.strip())
+    except ValueError:
+        await message.answer("❌ قیمت باید عدد باشد؛ مثلاً 500")
+        return
+    if price <= 0:
+        await message.answer("❌ قیمت باید بیشتر از صفر باشد.")
+        return
+    resource, amount = state["resource"], state["amount"]
+    user_id = message.from_user.id
+    async with db_pool.acquire() as conn:
+        async with conn.transaction():
+            resources = await conn.fetchrow("SELECT * FROM resources WHERE user_id=$1 FOR UPDATE", user_id)
+            if not resources or resources[resource] < amount:
+                await message.answer("❌ موجودی منابع برای این فروش کافی نیست.")
+                market_state.pop(key, None)
+                return
+            await conn.execute(f"UPDATE resources SET {resource}={resource}-$1 WHERE user_id=$2", amount, user_id)
+            offer = await conn.fetchrow(
+                """INSERT INTO market_offers(seller_id, resource_type, amount, price) VALUES($1,$2,$3,$4) RETURNING id""",
+                user_id, resource, amount, price
+            )
+    market_state.pop(key, None)
+    await message.answer(
+        "📤 <b>عرضه در بازار انجام شد!</b>\n\n"
+        f"🆔 شناسه پیشنهاد: <code>{offer['id']}</code>\n"
+        f"📦 {MARKET_RESOURCES[resource]}: {amount:,}\n"
+        f"💰 قیمت کل: {price:,} سکه",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🏪 مشاهده بازار", callback_data="market")]
+        ])
     )
 
 
@@ -4044,13 +4197,12 @@ async def telegram_group_transfer_reply_router(message: Message):
     async with db_pool.acquire() as conn:
         recipient = await conn.fetchrow(
             """
-            SELECT p.user_id, p.first_name, p.username, c.city_name
+            SELECT p.user_id, p.first_name, COALESCE(NULLIF(gm.username,''), p.username) AS username, c.city_name
             FROM players p
-            LEFT JOIN cities c ON c.user_id=p.user_id
+            INNER JOIN cities c ON c.user_id=p.user_id
             INNER JOIN telegram_group_mayors gm
                 ON gm.user_id=p.user_id AND gm.chat_id=$1
-            WHERE LOWER(COALESCE(p.username,''))=LOWER($2)
-              AND c.user_id IS NOT NULL
+            WHERE LOWER(COALESCE(NULLIF(gm.username,''), p.username,''))=LOWER($2)
             LIMIT 1
             """,
             message.chat.id, username,
@@ -5574,8 +5726,7 @@ async def commands_command(
         "<code>/help PLAYER_ID COINS FOOD MATERIALS</code>\n\n"
         "🏙️ <b>گروه تلگرامی:</b> ربات را به گروه اضافه و مدیر کن؛ سپس اعضا با نوشتن «شهر من» پنل دارایی خود را می‌بینند.\n\n"
         "🏪 <b>بازار:</b>\n"
-        "<code>/sell food 100 50</code>\n"
-        "<code>/buy OFFER_ID</code>\n\n"
+        "برای خرید و فروش منابع از دکمه «🏪 بازار» در منوی اصلی استفاده کن.\n\n"
         "برای بقیه امکانات از منوی اصلی استفاده کن.",
         reply_markup=main_keyboard(),
     )

@@ -17,6 +17,8 @@ from aiogram.types import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     Message,
+    ChatMemberUpdated,
+    ForceReply,
     ReplyKeyboardMarkup,
     KeyboardButton,
 )
@@ -53,6 +55,26 @@ bot = Bot(
 dp = Dispatcher()
 
 db_pool = None
+
+# وضعیت موقت انتقال دارایی داخل گروه‌های واقعی تلگرام
+group_transfer_state = {}
+
+TRANSFER_RESOURCES = {
+    "coins": "💰 سکه",
+    "food": "🍞 غذا",
+    "materials": "🧱 مصالح",
+    "energy": "⚡ انرژی",
+    "water": "💧 آب",
+    "equipment": "🧰 تجهیزات",
+}
+TRANSFER_ALIASES = {
+    "سکه": "coins", "پول": "coins", "coins": "coins",
+    "غذا": "food", "food": "food",
+    "مصالح": "materials", "آجر": "materials", "اجر": "materials", "materials": "materials",
+    "انرژی": "energy", "energy": "energy",
+    "آب": "water", "water": "water",
+    "تجهیزات": "equipment", "equipment": "equipment",
+}
 
 
 # =========================================================
@@ -429,29 +451,6 @@ MARKET_RESOURCES = {
 
 
 # =========================================================
-# GROUP CHALLENGES
-# =========================================================
-
-CHALLENGES = {
-    "population": {
-        "name": "👥 رشد جمعیت",
-        "target": 100,
-        "reward": 500,
-    },
-    "economy": {
-        "name": "📈 اقتصاد",
-        "target": 300,
-        "reward": 600,
-    },
-    "crisis": {
-        "name": "🚨 مدیریت بحران",
-        "target": 5,
-        "reward": 700,
-    },
-}
-
-
-# =========================================================
 # HELPERS
 # =========================================================
 
@@ -566,10 +565,6 @@ def main_keyboard():
                 ),
             ],
             [
-                InlineKeyboardButton(
-                    text="👥 گروه‌ها",
-                    callback_data="groups",
-                ),
                 InlineKeyboardButton(
                     text="📰 روزنامه شهر",
                     callback_data="news",
@@ -1061,6 +1056,46 @@ async def init_db():
                 status TEXT DEFAULT 'active',
                 created_at TIMESTAMPTZ DEFAULT NOW(),
                 completed_at TIMESTAMPTZ
+            )
+            """
+        )
+
+        await conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS telegram_groups (
+                chat_id BIGINT PRIMARY KEY,
+                title TEXT,
+                bot_is_admin BOOLEAN DEFAULT FALSE,
+                updated_at TIMESTAMPTZ DEFAULT NOW()
+            )
+            """
+        )
+
+        await conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS telegram_group_mayors (
+                chat_id BIGINT REFERENCES telegram_groups(chat_id) ON DELETE CASCADE,
+                user_id BIGINT REFERENCES players(user_id) ON DELETE CASCADE,
+                username TEXT,
+                first_name TEXT,
+                last_seen TIMESTAMPTZ DEFAULT NOW(),
+                PRIMARY KEY(chat_id, user_id)
+            )
+            """
+        )
+
+        await conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS group_transfers (
+                id BIGSERIAL PRIMARY KEY,
+                chat_id BIGINT REFERENCES telegram_groups(chat_id) ON DELETE CASCADE,
+                sender_id BIGINT REFERENCES players(user_id) ON DELETE CASCADE,
+                recipient_id BIGINT REFERENCES players(user_id) ON DELETE CASCADE,
+                resource_type TEXT NOT NULL,
+                amount INTEGER NOT NULL,
+                deliver_at TIMESTAMPTZ NOT NULL,
+                status TEXT DEFAULT 'pending',
+                created_at TIMESTAMPTZ DEFAULT NOW()
             )
             """
         )
@@ -2168,6 +2203,17 @@ async def building_handler(
 
     await add_xp(user_id, 20)
 
+    try:
+        await bot.send_message(
+            user_id,
+            f"🏗️ <b>{safe_text(data['name'])}</b>\n\n"
+            f"{action} سطح {next_level} با موفقیت شروع شد.\n"
+            f"⏳ زمان لازم: <b>{duration_hours} ساعت</b>\n"
+            f"پس از پایان زمان، سطح {next_level} فعال می‌شود."
+        )
+    except Exception:
+        logging.exception("Could not notify building construction start")
+
     await callback.message.edit_text(
         text
         + f"\n\n⏳ {action} شروع شد."
@@ -2849,18 +2895,6 @@ async def social_callback(
             user_id,
         )
 
-        groups = await conn.fetch(
-            """
-            SELECT
-                g.id,
-                g.name
-            FROM groups g
-            JOIN group_members gm
-                ON gm.group_id=g.id
-            WHERE gm.user_id=$1
-            """,
-            user_id,
-        )
 
     if friends:
         friend_lines = []
@@ -2882,23 +2916,6 @@ async def social_callback(
             "به دوستانت اضافه کنی."
         )
 
-    if groups:
-        group_lines = []
-
-        for group in groups:
-            group_lines.append(
-                f"👥 {safe_text(group['name'])}\n"
-                f"🆔 شناسه گروه: {group['id']}"
-            )
-
-        group_text = "\n\n".join(
-            group_lines
-        )
-
-    else:
-        group_text = (
-            "عضو هیچ گروهی نیستی."
-        )
 
     pending = pending or 0
 
@@ -2910,9 +2927,6 @@ async def social_callback(
         "📨 <b>درخواست‌های جدید</b>\n\n"
         f"تعداد درخواست‌های جدید: "
         f"{pending}\n\n"
-        "━━━━━━━━━━━━\n\n"
-        "👥 <b>گروه‌های من</b>\n\n"
-        f"{group_text}\n\n"
         "━━━━━━━━━━━━\n\n"
         "از دکمه‌های زیر برای مدیریت "
         "ارتباطاتت استفاده کن."
@@ -3426,518 +3440,6 @@ async def help_command(message: Message):
 
 
 # =========================================================
-# GROUP CREATE
-# =========================================================
-
-@dp.message(Command("creategroup"))
-async def create_group(message: Message):
-    user_id = await ensure_player(message)
-
-    parts = message.text.split(
-        maxsplit=1
-    )
-
-    if len(parts) < 2:
-        await message.answer(
-            "❌ مثال:\n"
-            "<code>/creategroup شهرداران تبریز</code>"
-        )
-        return
-
-    name = parts[1].strip()[:40]
-
-    if len(name) < 2:
-        await message.answer(
-            "❌ نام گروه خیلی کوتاه است."
-        )
-        return
-
-    async with db_pool.acquire() as conn:
-        async with conn.transaction():
-            group = await conn.fetchrow(
-                """
-                INSERT INTO groups(
-                    name,
-                    owner_id
-                )
-                VALUES($1,$2)
-                RETURNING id
-                """,
-                name,
-                user_id,
-            )
-
-            await conn.execute(
-                """
-                INSERT INTO group_members(
-                    group_id,
-                    user_id
-                )
-                VALUES($1,$2)
-                """,
-                group["id"],
-                user_id,
-            )
-
-    await message.answer(
-        "👥 <b>گروه ساخته شد!</b>\n\n"
-        f"نام: {safe_text(name)}\n"
-        f"🆔 شناسه گروه: "
-        f"<code>{group['id']}</code>\n\n"
-        "این شناسه را برای دوستانت بفرست."
-    )
-
-
-# =========================================================
-# JOIN GROUP
-# =========================================================
-
-@dp.message(Command("joingroup"))
-async def join_group(message: Message):
-    user_id = await ensure_player(message)
-
-    parts = message.text.split()
-
-    if len(parts) != 2:
-        await message.answer(
-            "❌ مثال:\n"
-            "<code>/joingroup 12</code>"
-        )
-        return
-
-    try:
-        group_id = int(parts[1])
-    except ValueError:
-        await message.answer(
-            "❌ شناسه گروه اشتباه است."
-        )
-        return
-
-    async with db_pool.acquire() as conn:
-        group = await conn.fetchrow(
-            """
-            SELECT *
-            FROM groups
-            WHERE id=$1
-            """,
-            group_id,
-        )
-
-        if not group:
-            await message.answer(
-                "❌ گروه پیدا نشد."
-            )
-            return
-
-        await conn.execute(
-            """
-            INSERT INTO group_members(
-                group_id,
-                user_id
-            )
-            VALUES($1,$2)
-            ON CONFLICT DO NOTHING
-            """,
-            group_id,
-            user_id,
-        )
-
-    await message.answer(
-        "✅ <b>وارد گروه شدی!</b>\n\n"
-        f"👥 گروه: {safe_text(group['name'])}\n"
-        f"🆔 شناسه: {group['id']}"
-    )
-
-
-# =========================================================
-# GROUPS SCREEN
-# =========================================================
-
-@dp.callback_query(F.data == "groups")
-async def groups_callback(
-    callback: CallbackQuery
-):
-    await callback.answer()
-
-    user_id = callback.from_user.id
-
-    await ensure_callback_player(user_id)
-
-    async with db_pool.acquire() as conn:
-        groups = await conn.fetch(
-            """
-            SELECT
-                g.id,
-                g.name,
-                g.owner_id,
-                COUNT(gm2.user_id) AS members
-            FROM groups g
-            JOIN group_members gm
-                ON gm.group_id=g.id
-            LEFT JOIN group_members gm2
-                ON gm2.group_id=g.id
-            WHERE gm.user_id=$1
-            GROUP BY
-                g.id,
-                g.name,
-                g.owner_id,
-                g.created_at
-            ORDER BY g.created_at DESC
-            """,
-            user_id,
-        )
-
-    if not groups:
-        text = (
-            "👥 <b>گروه‌ها</b>\n\n"
-            "هنوز عضو گروهی نیستی.\n\n"
-            "برای ساخت گروه:\n"
-            "<code>/creategroup نام گروه</code>\n\n"
-            "برای ورود:\n"
-            "<code>/joingroup GROUP_ID</code>"
-        )
-
-    else:
-        lines = [
-            "👥 <b>گروه‌های من</b>\n"
-        ]
-
-        for group in groups:
-            owner_text = (
-                "👑 سازنده"
-                if group["owner_id"] == user_id
-                else "👤 عضو"
-            )
-
-            lines.append(
-                f"👥 {safe_text(group['name'])}\n"
-                f"🆔 {group['id']}\n"
-                f"👤 اعضا: {group['members']}\n"
-                f"{owner_text}"
-            )
-
-        text = "\n\n".join(lines)
-
-    await callback.message.edit_text(
-        text,
-        reply_markup=InlineKeyboardMarkup(
-            inline_keyboard=[
-                [
-                    InlineKeyboardButton(
-                        text="🏆 چالش‌های گروهی",
-                        callback_data="group_challenges",
-                    )
-                ],
-                [
-                    InlineKeyboardButton(
-                        text="🔙 بازگشت",
-                        callback_data="menu",
-                    )
-                ],
-            ]
-        ),
-    )
-
-
-# =========================================================
-# GROUP CHALLENGES
-# =========================================================
-
-async def get_user_group(user_id):
-    async with db_pool.acquire() as conn:
-        return await conn.fetchrow(
-            """
-            SELECT g.*
-            FROM groups g
-            JOIN group_members gm
-                ON gm.group_id=g.id
-            WHERE gm.user_id=$1
-            ORDER BY g.created_at
-            LIMIT 1
-            """,
-            user_id,
-        )
-
-
-async def update_group_challenges(group_id):
-    async with db_pool.acquire() as conn:
-        members = await conn.fetch(
-            """
-            SELECT
-                gm.user_id,
-                c.population,
-                c.economy
-            FROM group_members gm
-            JOIN cities c
-                ON c.user_id=gm.user_id
-            WHERE gm.group_id=$1
-            """,
-            group_id,
-        )
-
-        if not members:
-            return
-
-        total_population = sum(
-            row["population"]
-            for row in members
-        )
-
-        total_economy = sum(
-            row["economy"]
-            for row in members
-        )
-
-        active_challenges = await conn.fetch(
-            """
-            SELECT *
-            FROM group_challenges
-            WHERE group_id=$1
-              AND status='active'
-            FOR UPDATE
-            """,
-            group_id,
-        )
-
-        for challenge in active_challenges:
-            challenge_type = challenge[
-                "challenge_type"
-            ]
-
-            if challenge_type == "population":
-                progress = min(
-                    challenge["target"],
-                    max(
-                        0,
-                        total_population - (
-                            100 * len(members)
-                        ),
-                    ),
-                )
-
-            elif challenge_type == "economy":
-                progress = min(
-                    challenge["target"],
-                    total_economy,
-                )
-
-            else:
-                progress = challenge[
-                    "progress"
-                ]
-
-            if progress >= challenge["target"]:
-                await conn.execute(
-                    """
-                    UPDATE group_challenges
-                    SET
-                        progress=$1,
-                        status='completed',
-                        completed_at=NOW()
-                    WHERE id=$2
-                    """,
-                    challenge["target"],
-                    challenge["id"],
-                )
-
-                await conn.execute(
-                    """
-                    UPDATE resources r
-                    SET coins=r.coins+$1
-                    FROM group_members gm
-                    WHERE gm.group_id=$2
-                      AND gm.user_id=r.user_id
-                    """,
-                    challenge["reward"],
-                    group_id,
-                )
-
-            else:
-                await conn.execute(
-                    """
-                    UPDATE group_challenges
-                    SET progress=$1
-                    WHERE id=$2
-                    """,
-                    progress,
-                    challenge["id"],
-                )
-
-
-@dp.callback_query(
-    F.data == "group_challenges"
-)
-async def group_challenges_callback(
-    callback: CallbackQuery
-):
-    await callback.answer()
-
-    user_id = callback.from_user.id
-
-    await ensure_callback_player(user_id)
-
-    group = await get_user_group(user_id)
-
-    if not group:
-        await callback.message.edit_text(
-            "❌ ابتدا باید عضو یک گروه باشی.",
-            reply_markup=back_keyboard(),
-        )
-        return
-
-    await update_group_challenges(
-        group["id"]
-    )
-
-    async with db_pool.acquire() as conn:
-        challenges = await conn.fetch(
-            """
-            SELECT *
-            FROM group_challenges
-            WHERE group_id=$1
-              AND status='active'
-            ORDER BY created_at DESC
-            LIMIT 5
-            """,
-            group["id"],
-        )
-
-    lines = [
-        "🏆 <b>چالش‌های گروه "
-        f"{safe_text(group['name'])}</b>\n"
-    ]
-
-    buttons = []
-
-    if challenges:
-        for challenge in challenges:
-            data = CHALLENGES.get(
-                challenge["challenge_type"]
-            )
-
-            if data:
-                lines.append(
-                    f"{data['name']}\n"
-                    f"📊 {challenge['progress']} / "
-                    f"{challenge['target']}\n"
-                    f"🎁 جایزه: "
-                    f"{challenge['reward']:,} سکه"
-                )
-    else:
-        lines.append(
-            "هنوز چالش فعالی وجود ندارد.\n\n"
-            "مدیر گروه می‌تواند چالش ایجاد کند."
-        )
-
-    buttons.append(
-        [
-            InlineKeyboardButton(
-                text="➕ ایجاد چالش",
-                callback_data="create_challenge",
-            )
-        ]
-    )
-
-    buttons.append(
-        [
-            InlineKeyboardButton(
-                text="🔙 گروه‌ها",
-                callback_data="groups",
-            )
-        ]
-    )
-
-    await callback.message.edit_text(
-        "\n\n".join(lines),
-        reply_markup=InlineKeyboardMarkup(
-            inline_keyboard=buttons
-        ),
-    )
-
-
-@dp.callback_query(
-    F.data == "create_challenge"
-)
-async def create_challenge_callback(
-    callback: CallbackQuery
-):
-    user_id = callback.from_user.id
-
-    await ensure_callback_player(user_id)
-
-    group = await get_user_group(user_id)
-
-    if not group:
-        await callback.answer(
-            "ابتدا وارد گروه شو.",
-            show_alert=True,
-        )
-        return
-
-    if group["owner_id"] != user_id:
-        await callback.answer(
-            "فقط سازنده گروه می‌تواند چالش ایجاد کند.",
-            show_alert=True,
-        )
-        return
-
-    async with db_pool.acquire() as conn:
-        active = await conn.fetchval(
-            """
-            SELECT COUNT(*)
-            FROM group_challenges
-            WHERE group_id=$1
-              AND status='active'
-            """,
-            group["id"],
-        )
-
-        if active >= 3:
-            await callback.answer(
-                "گروه حداکثر ۳ چالش فعال می‌تواند داشته باشد.",
-                show_alert=True,
-            )
-            return
-
-        challenge_type = random.choice(
-            list(CHALLENGES.keys())
-        )
-
-        data = CHALLENGES[
-            challenge_type
-        ]
-
-        target = data["target"]
-
-        await conn.execute(
-            """
-            INSERT INTO group_challenges(
-                group_id,
-                creator_id,
-                challenge_type,
-                target,
-                progress,
-                reward
-            )
-            VALUES($1,$2,$3,$4,0,$5)
-            """,
-            group["id"],
-            user_id,
-            challenge_type,
-            target,
-            data["reward"],
-        )
-
-    await callback.answer(
-        "🏆 چالش جدید ساخته شد!"
-    )
-
-    await group_challenges_callback(
-        callback
-    )
-
-
-# =========================================================
 # MARKET
 # =========================================================
 
@@ -4265,6 +3767,323 @@ async def buy_command(message: Message):
         f"💰 پرداخت: {offer['price']:,} سکه\n\n"
         "⭐ +15 XP"
     )
+
+
+# =========================================================
+# تعامل با گروه واقعی تلگرام
+# =========================================================
+
+async def is_bot_admin(chat_id):
+    try:
+        me = await bot.get_me()
+        member = await bot.get_chat_member(chat_id, me.id)
+        return member.status in {"administrator", "creator"}
+    except Exception:
+        return False
+
+
+async def register_telegram_group(chat_id, title, admin=False):
+    async with db_pool.acquire() as conn:
+        await conn.execute(
+            """
+            INSERT INTO telegram_groups(chat_id, title, bot_is_admin, updated_at)
+            VALUES($1,$2,$3,NOW())
+            ON CONFLICT(chat_id) DO UPDATE SET
+                title=EXCLUDED.title,
+                bot_is_admin=EXCLUDED.bot_is_admin,
+                updated_at=NOW()
+            """,
+            chat_id, title or "گروه تلگرام", admin,
+        )
+
+
+async def register_group_user(chat_id, user):
+    if not await is_bot_admin(chat_id):
+        return False
+    async with db_pool.acquire() as conn:
+        await conn.execute(
+            """
+            INSERT INTO telegram_group_mayors(chat_id,user_id,username,first_name,last_seen)
+            VALUES($1,$2,$3,$4,NOW())
+            ON CONFLICT(chat_id,user_id) DO UPDATE SET
+                username=EXCLUDED.username,
+                first_name=EXCLUDED.first_name,
+                last_seen=NOW()
+            """,
+            chat_id, user.id, user.username, user.first_name,
+        )
+    return True
+
+
+async def register_group_mayor(message):
+    if message.chat.type not in {"group", "supergroup"}:
+        return False
+    if not await is_bot_admin(message.chat.id):
+        return False
+    await register_telegram_group(message.chat.id, message.chat.title, True)
+    await ensure_player(message)
+    async with db_pool.acquire() as conn:
+        await conn.execute(
+            """
+            INSERT INTO telegram_group_mayors(chat_id,user_id,username,first_name,last_seen)
+            VALUES($1,$2,$3,$4,NOW())
+            ON CONFLICT(chat_id,user_id) DO UPDATE SET
+                username=EXCLUDED.username,
+                first_name=EXCLUDED.first_name,
+                last_seen=NOW()
+            """,
+            message.chat.id,
+            message.from_user.id,
+            message.from_user.username,
+            message.from_user.first_name,
+        )
+    return True
+
+
+def group_assets_text(row):
+    return (
+        "💼 <b>پنل دارایی شهردار</b>\n\n"
+        f"💰 سکه: <b>{row['coins']:,}</b>\n"
+        f"🧱 مصالح: <b>{row['materials']:,}</b>\n"
+        f"🍞 غذا: <b>{row['food']:,}</b>\n"
+        f"⚡ انرژی: <b>{row['energy']:,}</b>\n"
+        f"💧 آب: <b>{row['water']:,}</b>\n"
+        f"🧰 تجهیزات: <b>{row['equipment']:,}</b>\n\n"
+        "از دکمه زیر می‌توانی دارایی را به شهردار دیگری در همین گروه منتقل کنی."
+    )
+
+
+def group_assets_keyboard():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="💸 انتقال دارایی", callback_data="telegram_group:transfer")],
+        [InlineKeyboardButton(text="🔄 بروزرسانی", callback_data="telegram_group:panel")],
+    ])
+
+
+@dp.my_chat_member()
+async def bot_group_status(update: ChatMemberUpdated):
+    if update.chat.type not in {"group", "supergroup"}:
+        return
+    status = update.new_chat_member.status
+    admin = status in {"administrator", "creator"}
+    await register_telegram_group(update.chat.id, update.chat.title, admin)
+    if admin:
+        try:
+            await bot.send_message(
+                update.chat.id,
+                "🏙️ <b>شهر من فعال شد!</b>\n\n"
+                "من مدیر گروه هستم. هر شهردار می‌تواند «شهر من» را بنویسد و پنل دارایی خودش را باز کند."
+            )
+        except Exception:
+            pass
+
+
+@dp.message(lambda m: m.chat.type in {"group", "supergroup"} and (m.text or "").strip() == "شهر من")
+async def group_city_panel(message: Message):
+    if not await is_bot_admin(message.chat.id):
+        await message.reply("⚠️ برای استفاده از امکانات شهر من، ابتدا ربات را مدیر گروه کنید.")
+        return
+    await register_group_mayor(message)
+    user_id = message.from_user.id
+    await process_player_tick(user_id)
+    async with db_pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT * FROM resources WHERE user_id=$1", user_id)
+    if not row:
+        await message.reply("❌ منابع شهر پیدا نشد.")
+        return
+    await message.reply(group_assets_text(row), reply_markup=group_assets_keyboard())
+
+
+@dp.callback_query(F.data == "telegram_group:panel")
+async def telegram_group_panel(callback: CallbackQuery):
+    if callback.message.chat.type not in {"group", "supergroup"}:
+        await callback.answer("این پنل فقط داخل گروه فعال است.", show_alert=True)
+        return
+    if not await is_bot_admin(callback.message.chat.id):
+        await callback.answer("ربات دیگر مدیر گروه نیست.", show_alert=True)
+        return
+    await register_group_user(callback.message.chat.id, callback.from_user)
+    async with db_pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT * FROM resources WHERE user_id=$1", callback.from_user.id)
+    await callback.answer()
+    await callback.message.edit_text(group_assets_text(row), reply_markup=group_assets_keyboard())
+
+
+async def get_resource_balance(user_id, resource_type):
+    async with db_pool.acquire() as conn:
+        return await conn.fetchval(f"SELECT {resource_type} FROM resources WHERE user_id=$1", user_id) or 0
+
+
+@dp.callback_query(F.data == "telegram_group:transfer")
+async def telegram_group_transfer_start(callback: CallbackQuery):
+    if callback.message.chat.type not in {"group", "supergroup"}:
+        await callback.answer("فقط داخل گروه فعال است.", show_alert=True)
+        return
+    if not await is_bot_admin(callback.message.chat.id):
+        await callback.answer("ربات باید مدیر گروه باشد.", show_alert=True)
+        return
+    await register_group_user(callback.message.chat.id, callback.from_user)
+    uid = callback.from_user.id
+    balances = {}
+    async with db_pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT coins,food,materials,energy,water,equipment FROM resources WHERE user_id=$1", uid)
+    if row:
+        balances = dict(row)
+    key = (callback.message.chat.id, uid)
+    group_transfer_state[key] = {"step": "resource", "prompt_id": None, "balances": balances}
+    msg = await callback.message.answer(
+        "💸 <b>انتقال دارایی</b>\n\n"
+        "چه منبعی را می‌خواهی انتقال بدهی؟\n"
+        "روی همین پیام ریپلای کن و بنویس؛ مثلاً «آجر» یا «سکه».",
+        reply_markup=ForceReply(selective=True),
+    )
+    group_transfer_state[key]["prompt_id"] = msg.message_id
+    await callback.answer()
+
+
+async def process_telegram_group_reply(message: Message):
+    if message.chat.type not in {"group", "supergroup"} or not message.reply_to_message or not message.text:
+        return False
+    key = (message.chat.id, message.from_user.id)
+    state = group_transfer_state.get(key)
+    if not state or state.get("prompt_id") != message.reply_to_message.message_id:
+        return False
+
+    if state["step"] == "resource":
+        resource_type = TRANSFER_ALIASES.get(message.text.strip().lower())
+        if not resource_type:
+            await message.reply("❌ منبع شناخته نشد. بنویس: سکه، غذا، آجر، مصالح، انرژی، آب یا تجهیزات.")
+            return True
+        balance = state["balances"].get(resource_type, 0)
+        state["resource"] = resource_type
+        state["step"] = "amount"
+        msg = await message.answer(
+            f"📦 {TRANSFER_RESOURCES[resource_type]}\n\n"
+            f"موجودی فعلی: <b>{balance:,}</b>\n\n"
+            "چه مقداری می‌خواهی انتقال بدهی؟ هر عددی خواستی بنویس.",
+            reply_markup=ForceReply(selective=True),
+        )
+        state["prompt_id"] = msg.message_id
+        return True
+
+    if state["step"] == "amount":
+        try:
+            amount = int(message.text.strip().replace(",", ""))
+        except ValueError:
+            await message.reply("❌ مقدار باید یک عدد باشد؛ مثلاً 100")
+            return True
+        if amount <= 0:
+            await message.reply("❌ مقدار باید بیشتر از صفر باشد.")
+            return True
+        resource_type = state["resource"]
+        balance = await get_resource_balance(message.from_user.id, resource_type)
+        if amount > balance:
+            await message.reply(f"❌ موجودی کافی نیست. موجودی فعلی: <b>{balance:,}</b>")
+            return True
+        state["amount"] = amount
+        async with db_pool.acquire() as conn:
+            mayors = await conn.fetch(
+                """
+                SELECT user_id, first_name, username
+                FROM telegram_group_mayors
+                WHERE chat_id=$1 AND user_id<>$2
+                ORDER BY first_name
+                """,
+                message.chat.id, message.from_user.id,
+            )
+        if not mayors:
+            await message.reply("❌ فعلاً شهردار دیگری که شهر من را در این گروه باز کرده باشد وجود ندارد.")
+            group_transfer_state.pop(key, None)
+            return True
+        buttons = []
+        for mayor in mayors:
+            name = mayor["first_name"] or (f"@{mayor['username']}" if mayor["username"] else "شهردار")
+            buttons.append([InlineKeyboardButton(text=f"👑 {name}", callback_data=f"telegram_group:recipient:{mayor['user_id']}")])
+        buttons.append([InlineKeyboardButton(text="❌ لغو", callback_data="telegram_group:cancel")])
+        await message.answer(
+            f"📤 {TRANSFER_RESOURCES[resource_type]} × <b>{amount:,}</b>\n\n"
+            "به کدام شهردار می‌خواهی انتقال بدهی؟",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
+        )
+        state["step"] = "recipient"
+        return True
+    return False
+
+
+@dp.callback_query(F.data.startswith("telegram_group:recipient:"))
+async def telegram_group_recipient(callback: CallbackQuery):
+    chat_id = callback.message.chat.id
+    uid = callback.from_user.id
+    key = (chat_id, uid)
+    state = group_transfer_state.get(key)
+    if not state or state.get("step") != "recipient":
+        await callback.answer("این انتقال منقضی شده است.", show_alert=True)
+        return
+    rid = int(callback.data.rsplit(":", 1)[1])
+    async with db_pool.acquire() as conn:
+        exists = await conn.fetchval("SELECT 1 FROM telegram_group_mayors WHERE chat_id=$1 AND user_id=$2", chat_id, rid)
+    if not exists:
+        await callback.answer("این شهردار دیگر در گروه ثبت نیست.", show_alert=True)
+        return
+    resource_type = state["resource"]
+    amount = state["amount"]
+    delay = max(1, min(60, (amount + 99) // 100))
+    deliver_at = now_utc() + timedelta(minutes=delay)
+    async with db_pool.acquire() as conn:
+        async with conn.transaction():
+            src = await conn.fetchrow("SELECT * FROM resources WHERE user_id=$1 FOR UPDATE", uid)
+            if not src or src[resource_type] < amount:
+                await callback.answer("موجودی تو تغییر کرده و کافی نیست.", show_alert=True)
+                return
+            await conn.execute(f"UPDATE resources SET {resource_type}={resource_type}-$1 WHERE user_id=$2", amount, uid)
+            await conn.execute(
+                """
+                INSERT INTO group_transfers(chat_id,sender_id,recipient_id,resource_type,amount,deliver_at)
+                VALUES($1,$2,$3,$4,$5,$6)
+                """,
+                chat_id, uid, rid, resource_type, amount, deliver_at,
+            )
+    group_transfer_state.pop(key, None)
+    await callback.answer("انتقال ثبت شد.")
+    await callback.message.edit_text(
+        f"✅ <b>معامله با موفقیت انجام شد!</b>\n\n"
+        f"📦 {TRANSFER_RESOURCES[resource_type]}: {amount:,}\n"
+        f"⏳ زمان انتقال: حدود {delay} دقیقه\n"
+        "دارایی پس از پایان زمان به شهر مقصد می‌رسد."
+    )
+
+
+@dp.callback_query(F.data == "telegram_group:cancel")
+async def telegram_group_cancel(callback: CallbackQuery):
+    group_transfer_state.pop((callback.message.chat.id, callback.from_user.id), None)
+    await callback.answer("انتقال لغو شد.")
+    await callback.message.edit_text("❌ انتقال دارایی لغو شد.")
+
+
+async def process_group_transfers():
+    completed = []
+    async with db_pool.acquire() as conn:
+        async with conn.transaction():
+            rows = await conn.fetch(
+                "SELECT * FROM group_transfers WHERE status='pending' AND deliver_at<=NOW() ORDER BY id FOR UPDATE SKIP LOCKED"
+            )
+            for row in rows:
+                recipient_exists = await conn.fetchval("SELECT 1 FROM resources WHERE user_id=$1", row["recipient_id"])
+                if recipient_exists:
+                    rt = row["resource_type"]
+                    await conn.execute(f"UPDATE resources SET {rt}={rt}+$1 WHERE user_id=$2", row["amount"], row["recipient_id"])
+                await conn.execute("UPDATE group_transfers SET status='completed' WHERE id=$1", row["id"])
+                completed.append(row)
+    for row in completed:
+        label = TRANSFER_RESOURCES.get(row["resource_type"], "دارایی")
+        try:
+            await bot.send_message(row["recipient_id"], f"📦 <b>انتقال دارایی تکمیل شد!</b>\n\n{label}: {row['amount']:,}\nدارایی به شهر شما رسید.")
+        except Exception:
+            pass
+        try:
+            await bot.send_message(row["sender_id"], f"✅ <b>انتقال انجام شد!</b>\n\n{label}: {row['amount']:,}\nدارایی به شهر مقصد رسید.")
+        except Exception:
+            pass
 
 
 # =========================================================
@@ -5428,6 +5247,7 @@ async def game_tick():
             await create_daily_disaster_schedule()
             await trigger_due_natural_disasters()
             await process_weekly_payout()
+            await process_group_transfers()
 
             async with db_pool.acquire() as conn:
                 users = await conn.fetch(
@@ -5711,9 +5531,7 @@ async def commands_command(
         "<code>/addfriend PLAYER_ID</code>\n"
         "<code>/friends</code>\n"
         "<code>/help PLAYER_ID COINS FOOD MATERIALS</code>\n\n"
-        "👥 <b>گروه:</b>\n"
-        "<code>/creategroup نام گروه</code>\n"
-        "<code>/joingroup GROUP_ID</code>\n\n"
+        "🏙️ <b>گروه تلگرامی:</b> ربات را به گروه اضافه و مدیر کن؛ سپس اعضا با نوشتن «شهر من» پنل دارایی خود را می‌بینند.\n\n"
         "🏪 <b>بازار:</b>\n"
         "<code>/sell food 100 50</code>\n"
         "<code>/buy OFFER_ID</code>\n\n"
@@ -5863,3 +5681,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+

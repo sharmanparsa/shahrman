@@ -9,6 +9,7 @@ from html import escape
 import asyncpg
 from aiohttp import web
 from aiogram import Bot, Dispatcher, F
+from aiogram.dispatcher.middlewares.base import BaseMiddleware
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.filters import Command
@@ -53,6 +54,22 @@ bot = Bot(
 )
 
 dp = Dispatcher()
+
+class TelegramGroupMessageGuard(BaseMiddleware):
+    async def __call__(self, handler, event, data):
+        chat = getattr(event, "chat", None)
+        if chat and chat.type in {"group", "supergroup"}:
+            text = (getattr(event, "text", None) or "").strip()
+            if text == "شهر من":
+                return await handler(event, data)
+            reply = getattr(event, "reply_to_message", None)
+            user = getattr(event, "from_user", None)
+            if reply and user and (chat.id, user.id) in group_transfer_state:
+                return await handler(event, data)
+            return None
+        return await handler(event, data)
+
+dp.message.outer_middleware(TelegramGroupMessageGuard())
 
 db_pool = None
 
@@ -3856,7 +3873,6 @@ def group_assets_text(row):
 def group_assets_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="💸 انتقال دارایی", callback_data="telegram_group:transfer")],
-        [InlineKeyboardButton(text="🔄 بروزرسانی", callback_data="telegram_group:panel")],
     ])
 
 
@@ -3867,15 +3883,6 @@ async def bot_group_status(update: ChatMemberUpdated):
     status = update.new_chat_member.status
     admin = status in {"administrator", "creator"}
     await register_telegram_group(update.chat.id, update.chat.title, admin)
-    if admin:
-        try:
-            await bot.send_message(
-                update.chat.id,
-                "🏙️ <b>شهر من فعال شد!</b>\n\n"
-                "من مدیر گروه هستم. هر شهردار می‌تواند «شهر من» را بنویسد و پنل دارایی خودش را باز کند."
-            )
-        except Exception:
-            pass
 
 
 @dp.message(lambda m: m.chat.type in {"group", "supergroup"} and (m.text or "").strip() == "شهر من")
@@ -3892,21 +3899,6 @@ async def group_city_panel(message: Message):
         await message.reply("❌ منابع شهر پیدا نشد.")
         return
     await message.reply(group_assets_text(row), reply_markup=group_assets_keyboard())
-
-
-@dp.callback_query(F.data == "telegram_group:panel")
-async def telegram_group_panel(callback: CallbackQuery):
-    if callback.message.chat.type not in {"group", "supergroup"}:
-        await callback.answer("این پنل فقط داخل گروه فعال است.", show_alert=True)
-        return
-    if not await is_bot_admin(callback.message.chat.id):
-        await callback.answer("ربات دیگر مدیر گروه نیست.", show_alert=True)
-        return
-    await register_group_user(callback.message.chat.id, callback.from_user)
-    async with db_pool.acquire() as conn:
-        row = await conn.fetchrow("SELECT * FROM resources WHERE user_id=$1", callback.from_user.id)
-    await callback.answer()
-    await callback.message.edit_text(group_assets_text(row), reply_markup=group_assets_keyboard())
 
 
 async def get_resource_balance(user_id, resource_type):
@@ -3931,10 +3923,10 @@ async def telegram_group_transfer_start(callback: CallbackQuery):
         balances = dict(row)
     key = (callback.message.chat.id, uid)
     group_transfer_state[key] = {"step": "resource", "prompt_id": None, "balances": balances}
-    msg = await callback.message.answer(
+    msg = await callback.message.reply(
         "💸 <b>انتقال دارایی</b>\n\n"
         "چه منبعی را می‌خواهی انتقال بدهی؟\n"
-        "روی همین پیام ریپلای کن و بنویس؛ مثلاً «آجر» یا «سکه».",
+        "روی همین پیام ریپلای کن و یکی از این موارد را بنویس: سکه، مصالح، غذا، انرژی، آب یا تجهیزات.",
         reply_markup=ForceReply(selective=True),
     )
     group_transfer_state[key]["prompt_id"] = msg.message_id
@@ -3957,10 +3949,10 @@ async def process_telegram_group_reply(message: Message):
         balance = state["balances"].get(resource_type, 0)
         state["resource"] = resource_type
         state["step"] = "amount"
-        msg = await message.answer(
+        msg = await message.reply(
             f"📦 {TRANSFER_RESOURCES[resource_type]}\n\n"
             f"موجودی فعلی: <b>{balance:,}</b>\n\n"
-            "چه مقداری می‌خواهی انتقال بدهی؟ هر عددی خواستی بنویس.",
+            "چه مقداری می‌خواهی انتقال بدهی؟ هر عددی که در محدوده موجودی داری بنویس.",
             reply_markup=ForceReply(selective=True),
         )
         state["prompt_id"] = msg.message_id
@@ -3981,75 +3973,91 @@ async def process_telegram_group_reply(message: Message):
             await message.reply(f"❌ موجودی کافی نیست. موجودی فعلی: <b>{balance:,}</b>")
             return True
         state["amount"] = amount
-        async with db_pool.acquire() as conn:
-            mayors = await conn.fetch(
-                """
-                SELECT user_id, first_name, username
-                FROM telegram_group_mayors
-                WHERE chat_id=$1 AND user_id<>$2
-                ORDER BY first_name
-                """,
-                message.chat.id, message.from_user.id,
-            )
-        if not mayors:
-            await message.reply("❌ فعلاً شهردار دیگری که شهر من را در این گروه باز کرده باشد وجود ندارد.")
-            group_transfer_state.pop(key, None)
-            return True
-        buttons = []
-        for mayor in mayors:
-            name = mayor["first_name"] or (f"@{mayor['username']}" if mayor["username"] else "شهردار")
-            buttons.append([InlineKeyboardButton(text=f"👑 {name}", callback_data=f"telegram_group:recipient:{mayor['user_id']}")])
-        buttons.append([InlineKeyboardButton(text="❌ لغو", callback_data="telegram_group:cancel")])
-        await message.answer(
+        state["step"] = "recipient_id"
+        msg = await message.reply(
             f"📤 {TRANSFER_RESOURCES[resource_type]} × <b>{amount:,}</b>\n\n"
-            "به کدام شهردار می‌خواهی انتقال بدهی؟",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
+            "شناسه (ID) شهردار موردنظر را بفرست.\n"
+            "روی همین پیام ریپلای کن و فقط ID عددی او را بنویس.",
+            reply_markup=ForceReply(selective=True),
         )
-        state["step"] = "recipient"
+        state["prompt_id"] = msg.message_id
         return True
     return False
 
 
-@dp.callback_query(F.data.startswith("telegram_group:recipient:"))
-async def telegram_group_recipient(callback: CallbackQuery):
-    chat_id = callback.message.chat.id
-    uid = callback.from_user.id
-    key = (chat_id, uid)
+@dp.message(lambda m: m.chat.type in {"group", "supergroup"} and bool(m.reply_to_message) and bool(m.text))
+async def telegram_group_transfer_reply_router(message: Message):
+    key = (message.chat.id, message.from_user.id)
     state = group_transfer_state.get(key)
-    if not state or state.get("step") != "recipient":
-        await callback.answer("این انتقال منقضی شده است.", show_alert=True)
+    if not state or state.get("step") not in {"resource", "amount"} or state.get("prompt_id") != message.reply_to_message.message_id:
         return
-    rid = int(callback.data.rsplit(":", 1)[1])
+    await process_telegram_group_reply(message)
+
+
+@dp.message(lambda m: m.chat.type in {"group", "supergroup"} and bool(m.reply_to_message) and bool(m.text))
+async def telegram_group_transfer_recipient_id(message: Message):
+    key = (message.chat.id, message.from_user.id)
+    state = group_transfer_state.get(key)
+    if not state or state.get("step") != "recipient_id" or state.get("prompt_id") != message.reply_to_message.message_id:
+        return
+
+    try:
+        rid = int(message.text.strip())
+    except ValueError:
+        await message.reply("❌ شناسه باید فقط عدد باشد. دوباره ID شهردار را بفرست.", reply_markup=ForceReply(selective=True))
+        return
+
+    if rid == message.from_user.id:
+        await message.reply("❌ نمی‌توانی دارایی را به شهر خودت انتقال بدهی. ID شهردار دیگری را بفرست.", reply_markup=ForceReply(selective=True))
+        return
+
     async with db_pool.acquire() as conn:
-        exists = await conn.fetchval("SELECT 1 FROM telegram_group_mayors WHERE chat_id=$1 AND user_id=$2", chat_id, rid)
-    if not exists:
-        await callback.answer("این شهردار دیگر در گروه ثبت نیست.", show_alert=True)
+        recipient = await conn.fetchrow(
+            """
+            SELECT gm.user_id, gm.first_name, gm.username, c.city_name
+            FROM telegram_group_mayors gm
+            LEFT JOIN cities c ON c.user_id=gm.user_id
+            WHERE gm.chat_id=$1 AND gm.user_id=$2
+            """,
+            message.chat.id, rid,
+        )
+
+    if not recipient:
+        await message.reply("❌ این ID مربوط به شهرداری نیست که «شهر من» را در همین گروه فعال کرده باشد. ID را دوباره بفرست.", reply_markup=ForceReply(selective=True))
         return
+
     resource_type = state["resource"]
     amount = state["amount"]
-    delay = max(1, min(60, (amount + 99) // 100))
+    delay = random.randint(10, 60)
     deliver_at = now_utc() + timedelta(minutes=delay)
+
     async with db_pool.acquire() as conn:
         async with conn.transaction():
-            src = await conn.fetchrow("SELECT * FROM resources WHERE user_id=$1 FOR UPDATE", uid)
+            src = await conn.fetchrow("SELECT * FROM resources WHERE user_id=$1 FOR UPDATE", message.from_user.id)
             if not src or src[resource_type] < amount:
-                await callback.answer("موجودی تو تغییر کرده و کافی نیست.", show_alert=True)
-                return
-            await conn.execute(f"UPDATE resources SET {resource_type}={resource_type}-$1 WHERE user_id=$2", amount, uid)
+                await message.reply(f"❌ موجودی تو تغییر کرده و کافی نیست. موجودی فعلی: <b>{(src[resource_type] if src else 0):,}</b>")
+                group_transfer_state.pop(key, None)
+                return True
+            await conn.execute(
+                f"UPDATE resources SET {resource_type}={resource_type}-$1 WHERE user_id=$2",
+                amount, message.from_user.id,
+            )
             await conn.execute(
                 """
                 INSERT INTO group_transfers(chat_id,sender_id,recipient_id,resource_type,amount,deliver_at)
                 VALUES($1,$2,$3,$4,$5,$6)
                 """,
-                chat_id, uid, rid, resource_type, amount, deliver_at,
+                message.chat.id, message.from_user.id, rid, resource_type, amount, deliver_at,
             )
+
     group_transfer_state.pop(key, None)
-    await callback.answer("انتقال ثبت شد.")
-    await callback.message.edit_text(
-        f"✅ <b>معامله با موفقیت انجام شد!</b>\n\n"
-        f"📦 {TRANSFER_RESOURCES[resource_type]}: {amount:,}\n"
-        f"⏳ زمان انتقال: حدود {delay} دقیقه\n"
-        "دارایی پس از پایان زمان به شهر مقصد می‌رسد."
+    recipient_name = recipient["first_name"] or (f"@{recipient['username']}" if recipient["username"] else "شهردار مقصد")
+    await message.reply(
+        f"🚚 <b>کامیون بارگیری شد!</b>\n\n"
+        f"{TRANSFER_RESOURCES[resource_type]}: <b>{amount:,}</b>\n\n"
+        f"کامیون در حال حرکت به سمت شهر <b>{safe_text(recipient_name)}</b> است.\n"
+        f"⏳ زمان رسیدن: <b>{delay} دقیقه</b>\n\n"
+        "پس از رسیدن، دارایی به موجودی شهر مقصد اضافه می‌شود."
     )
 
 
@@ -5548,6 +5556,8 @@ async def commands_command(
 async def unknown_message(
     message: Message
 ):
+    if message.chat.type in {"group", "supergroup"}:
+        return
     await message.answer(
         "🏙️ برای مدیریت شهر از منوی زیر استفاده کن:\n\n"
         "<code>/start</code>\n"
@@ -5681,4 +5691,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-

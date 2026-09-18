@@ -3976,8 +3976,8 @@ async def process_telegram_group_reply(message: Message):
         state["step"] = "recipient_id"
         msg = await message.reply(
             f"📤 {TRANSFER_RESOURCES[resource_type]} × <b>{amount:,}</b>\n\n"
-            "شناسه (ID) شهردار موردنظر را بفرست.\n"
-            "روی همین پیام ریپلای کن و فقط ID عددی او را بنویس.",
+            "نام کاربری شهردار مقصد را بفرست.\n"
+            "روی همین پیام ریپلای کن و با @ بنویس؛ مثلاً @username",
             reply_markup=ForceReply(selective=True),
         )
         state["prompt_id"] = msg.message_id
@@ -4001,14 +4001,18 @@ async def telegram_group_transfer_recipient_id(message: Message):
     if not state or state.get("step") != "recipient_id" or state.get("prompt_id") != message.reply_to_message.message_id:
         return
 
-    try:
-        rid = int(message.text.strip())
-    except ValueError:
-        await message.reply("❌ شناسه باید فقط عدد باشد. دوباره ID شهردار را بفرست.", reply_markup=ForceReply(selective=True))
+    target = message.text.strip()
+    if not target.startswith("@"):
+        await message.reply("❌ نام کاربری مقصد باید با @ شروع شود؛ مثلاً @username", reply_markup=ForceReply(selective=True))
         return
 
-    if rid == message.from_user.id:
-        await message.reply("❌ نمی‌توانی دارایی را به شهر خودت انتقال بدهی. ID شهردار دیگری را بفرست.", reply_markup=ForceReply(selective=True))
+    username = target[1:].strip().split()[0] if target[1:].strip() else ""
+    if not username:
+        await message.reply("❌ نام کاربری معتبر نیست. مثلاً @username را بفرست.", reply_markup=ForceReply(selective=True))
+        return
+
+    if message.from_user.username and username.lower() == message.from_user.username.lower():
+        await message.reply("❌ نمی‌توانی دارایی را به شهر خودت انتقال بدهی. @username یک شهردار دیگر را بفرست.", reply_markup=ForceReply(selective=True))
         return
 
     async with db_pool.acquire() as conn:
@@ -4017,13 +4021,13 @@ async def telegram_group_transfer_recipient_id(message: Message):
             SELECT gm.user_id, gm.first_name, gm.username, c.city_name
             FROM telegram_group_mayors gm
             LEFT JOIN cities c ON c.user_id=gm.user_id
-            WHERE gm.chat_id=$1 AND gm.user_id=$2
+            WHERE gm.chat_id=$1 AND LOWER(gm.username)=LOWER($2)
             """,
-            message.chat.id, rid,
+            message.chat.id, username,
         )
 
-    if not recipient:
-        await message.reply("❌ این ID مربوط به شهرداری نیست که «شهر من» را در همین گروه فعال کرده باشد. ID را دوباره بفرست.", reply_markup=ForceReply(selective=True))
+    if not recipient or not recipient["city_name"]:
+        await message.reply("❌ این شخص شهر ندارد.", reply_markup=ForceReply(selective=True))
         return
 
     resource_type = state["resource"]

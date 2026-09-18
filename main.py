@@ -89,6 +89,28 @@ NATURAL_DISASTERS = [
 ]
 MIN_DISASTER_GAP_MINUTES = 120
 
+# زمان ارتقای ساختمان‌ها (ساعت)
+BUILDING_UPGRADE_HOURS = {
+    1: 2,
+    2: 10,
+    3: 20,
+    4: 40,
+}
+
+CRISIS_STAT_NAMES = {
+    "security": "امنیت",
+    "fire_safety": "ایمنی در برابر آتش‌سوزی",
+    "health": "سلامت",
+    "power": "برق",
+    "water": "آب",
+    "education": "آموزش",
+    "recreation": "تفریح",
+    "pollution_control": "کنترل آلودگی",
+    "infrastructure": "زیرساخت",
+    "crisis": "مدیریت بحران",
+    "economy": "اقتصاد",
+}
+
 
 # =========================================================
 # BUILDINGS
@@ -193,6 +215,7 @@ BUILDINGS = {
         "description": "تفریح، اشتغال و اقتصاد.",
     },
     "recycling": {
+        "material_income_hourly": 10,
         "name": "♻️ مرکز بازیافت",
         "cost": 600,
         "material": 200,
@@ -226,6 +249,7 @@ BUILDINGS = {
         "description": "زیرساخت و حمل‌ونقل.",
     },
     "waste": {
+        "material_income_hourly": 5,
         "name": "🗑️ مدیریت پسماند",
         "cost": 450,
         "material": 150,
@@ -237,6 +261,7 @@ BUILDINGS = {
     },
     "industry": {
         "income_hourly": 50,
+        "material_income_hourly": 15,
         "name": "🏭 منطقه صنعتی",
         "cost": 900,
         "material": 300,
@@ -401,9 +426,6 @@ MARKET_RESOURCES = {
     "water": "💧 آب",
     "equipment": "🧰 تجهیزات",
 }
-
-MARKET_PENDING = {}
-GROUP_PENDING = {}
 
 
 # =========================================================
@@ -576,28 +598,34 @@ def back_keyboard():
     )
 
 
-def building_keyboard():
+async def building_keyboard(user_id):
     rows = []
-
-    for key, data in BUILDINGS.items():
-        rows.append(
-            [
-                InlineKeyboardButton(
-                    text=data["name"],
-                    callback_data=f"building:{key}",
-                )
-            ]
+    async with db_pool.acquire() as conn:
+        levels = {
+            r["building_type"]: r["level"]
+            for r in await conn.fetch(
+                "SELECT building_type, level FROM buildings WHERE user_id=$1", user_id
+            )
+        }
+        active = await conn.fetchrow(
+            "SELECT building_type, target_level, ready_at FROM building_constructions WHERE user_id=$1 AND completed=FALSE ORDER BY ready_at LIMIT 1",
+            user_id,
         )
 
-    rows.append(
-        [
-            InlineKeyboardButton(
-                text="🔙 بازگشت",
-                callback_data="menu",
-            )
-        ]
-    )
+    for key, data in BUILDINGS.items():
+        level = levels.get(key, 0)
+        if active and active["building_type"] == key:
+            remaining = max(0, int((active["ready_at"] - now_utc()).total_seconds()))
+            hours, rem = divmod(remaining, 3600)
+            minutes = rem // 60
+            status = f"⏳ تا سطح {active['target_level']} ({hours}س {minutes}د)"
+        elif level > 0:
+            status = f"سطح {level}"
+        else:
+            status = "🔒 قفل"
+        rows.append([InlineKeyboardButton(text=f"{data['name']} — {status}", callback_data=f"building:{key}")])
 
+    rows.append([InlineKeyboardButton(text="🔙 بازگشت", callback_data="menu")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -859,6 +887,28 @@ async def init_db():
                 level INTEGER DEFAULT 0,
                 PRIMARY KEY(user_id, building_type)
             )
+            """
+        )
+
+        await conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS building_constructions (
+                id BIGSERIAL PRIMARY KEY,
+                user_id BIGINT REFERENCES players(user_id) ON DELETE CASCADE,
+                building_type TEXT NOT NULL,
+                target_level INTEGER NOT NULL,
+                started_at TIMESTAMPTZ DEFAULT NOW(),
+                ready_at TIMESTAMPTZ NOT NULL,
+                completed BOOLEAN DEFAULT FALSE
+            )
+            """
+        )
+
+        await conn.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS one_active_building_construction_per_user
+            ON building_constructions(user_id)
+            WHERE completed=FALSE
             """
         )
 
@@ -1452,6 +1502,7 @@ async def collect_income(user_id):
 
             maintenance = 0
             building_income_hourly = 0
+            building_materials_hourly = 0
 
             rows = await conn.fetch(
                 """
@@ -1476,6 +1527,10 @@ async def collect_income(user_id):
                         data.get("income_hourly", 0)
                         * row["level"]
                     )
+                    building_materials_hourly += (
+                        data.get("material_income_hourly", 0)
+                        * row["level"]
+                    )
 
             # حداقل درآمد خالص شهر: ۵۰ سکه در ساعت (۲۵ سکه در هر دوره ۳۰ دقیقه‌ای).
             base_income = max(
@@ -1484,18 +1539,16 @@ async def collect_income(user_id):
             )
 
             final_income = max(25, base_income - maintenance) * periods
+            material_gain = 10 * periods + (building_materials_hourly * periods)
 
             await conn.execute(
                 """
                 UPDATE resources
-                SET coins=GREATEST(
-                    0,
-                    coins+$1
-                )
-                WHERE user_id=$2
+                SET coins=GREATEST(0, coins+$1),
+                    materials=GREATEST(0, materials+$2)
+                WHERE user_id=$3
                 """,
-                final_income,
-                user_id,
+                final_income, material_gain, user_id,
             )
 
             await conn.execute(
@@ -1984,7 +2037,7 @@ async def buildings_callback(
     await callback.message.edit_text(
         "🏗️ <b>ساختمان‌های شهر</b>\n\n"
         "یک ساختمان را انتخاب کن تا سطح، هزینه و اثر آن را ببینی." + damage_text,
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=damage_buttons + building_keyboard().inline_keyboard),
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=damage_buttons + (await building_keyboard(user_id)).inline_keyboard),
     )
 
 
@@ -2019,31 +2072,28 @@ async def building_handler(
                 int(user_id),
             )
 
-            current = await conn.fetchval(
-                """
-                SELECT level
-                FROM buildings
-                WHERE user_id=$1
-                  AND building_type=$2
-                FOR UPDATE
-                """,
+            active_construction = await conn.fetchrow(
+                "SELECT * FROM building_constructions WHERE user_id=$1 AND completed=FALSE FOR UPDATE",
                 user_id,
-                key,
             )
+            if active_construction:
+                remaining = max(0, int((active_construction["ready_at"] - now_utc()).total_seconds()))
+                hours, rem = divmod(remaining, 3600)
+                minutes = rem // 60
+                await callback.answer(
+                    f"⏳ هنوز ساخت/ارتقای {BUILDINGS[active_construction['building_type']]['name']} تمام نشده؛ {hours} ساعت و {minutes} دقیقه باقی مانده.",
+                    show_alert=True,
+                )
+                return
 
-            current = current or 0
-
+            current = await conn.fetchval(
+                "SELECT level FROM buildings WHERE user_id=$1 AND building_type=$2 FOR UPDATE",
+                user_id, key,
+            ) or 0
             next_level = current + 1
-
-            cost = int(
-                data["cost"]
-                * (1 + current * 0.45)
-            )
-
-            material = int(
-                data["material"]
-                * (1 + current * 0.45)
-            )
+            cost = int(data["cost"] * (1 + current * 0.45))
+            material = int(data["material"] * (1 + current * 0.45))
+            duration_hours = BUILDING_UPGRADE_HOURS.get(current, 80 if current >= 5 else 2)
 
             resources = await conn.fetchrow(
                 """
@@ -2055,21 +2105,14 @@ async def building_handler(
                 user_id,
             )
 
-            action = (
-                "ساخت"
-                if current == 0
-                else "ارتقا"
-            )
-
-            housing_effect = (
-                data.get("housing", 0)
-            )
-
+            action = "ساخت" if current == 0 else "ارتقا"
+            housing_effect = data.get("housing", 0)
             text = (
                 f"{data['name']}\n\n"
                 f"📖 {safe_text(data['description'])}\n\n"
-                f"📊 سطح فعلی: {current}\n"
-                f"⬆️ سطح بعدی: {next_level}\n\n"
+                f"📊 سطح فعلی: {current if current else 'ساخته نشده'}\n"
+                f"⬆️ سطح بعدی: {next_level}\n"
+                f"⏱️ زمان {action}: {duration_hours} ساعت\n\n"
                 f"💰 هزینه: {cost:,} سکه\n"
                 f"🧱 مصالح: {material:,}\n"
             )
@@ -2117,44 +2160,18 @@ async def building_handler(
                 user_id,
             )
 
+            ready_at = now_utc() + timedelta(hours=duration_hours)
             await conn.execute(
-                """
-                INSERT INTO buildings(
-                    user_id,
-                    building_type,
-                    level
-                )
-                VALUES($1,$2,1)
-                ON CONFLICT(
-                    user_id,
-                    building_type
-                )
-                DO UPDATE SET
-                    level=buildings.level+1
-                """,
-                user_id,
-                key,
+                "INSERT INTO building_constructions(user_id, building_type, target_level, ready_at) VALUES($1,$2,$3,$4)",
+                user_id, key, next_level, ready_at,
             )
 
-            await conn.execute(
-                """
-                INSERT INTO news(
-                    user_id,
-                    text
-                )
-                VALUES($1,$2)
-                """,
-                user_id,
-                f"{data['name']} به سطح {next_level} رسید.",
-            )
-
-    await add_xp(user_id, 40)
-    await recalculate_city(user_id)
+    await add_xp(user_id, 20)
 
     await callback.message.edit_text(
         text
-        + f"\n\n✅ {action} با موفقیت انجام شد!"
-        + f"\n🏗️ سطح جدید: {next_level}",
+        + f"\n\n⏳ {action} شروع شد."
+        + f"\n🏗️ بعد از {duration_hours} ساعت، سطح {next_level} فعال می‌شود.",
         reply_markup=InlineKeyboardMarkup(
             inline_keyboard=[
                 [
@@ -2489,7 +2506,7 @@ async def crises_callback(
         f"{data['name']}\n\n"
         f"🔥 شدت: {crisis['severity']} / 100\n"
         f"🏛️ خدمت اصلی: "
-        f"{data['stat']}\n"
+        f"{CRISIS_STAT_NAMES.get(data['stat'], data['stat'])}\n"
         f"🎁 پاداش: "
         f"{data['reward']} سکه\n\n"
         "برای مدیریت بحران روی دکمه زیر بزن."
@@ -3412,121 +3429,214 @@ async def help_command(message: Message):
 # GROUP CREATE
 # =========================================================
 
+@dp.message(Command("creategroup"))
+async def create_group(message: Message):
+    user_id = await ensure_player(message)
+
+    parts = message.text.split(
+        maxsplit=1
+    )
+
+    if len(parts) < 2:
+        await message.answer(
+            "❌ مثال:\n"
+            "<code>/creategroup شهرداران تبریز</code>"
+        )
+        return
+
+    name = parts[1].strip()[:40]
+
+    if len(name) < 2:
+        await message.answer(
+            "❌ نام گروه خیلی کوتاه است."
+        )
+        return
+
+    async with db_pool.acquire() as conn:
+        async with conn.transaction():
+            group = await conn.fetchrow(
+                """
+                INSERT INTO groups(
+                    name,
+                    owner_id
+                )
+                VALUES($1,$2)
+                RETURNING id
+                """,
+                name,
+                user_id,
+            )
+
+            await conn.execute(
+                """
+                INSERT INTO group_members(
+                    group_id,
+                    user_id
+                )
+                VALUES($1,$2)
+                """,
+                group["id"],
+                user_id,
+            )
+
+    await message.answer(
+        "👥 <b>گروه ساخته شد!</b>\n\n"
+        f"نام: {safe_text(name)}\n"
+        f"🆔 شناسه گروه: "
+        f"<code>{group['id']}</code>\n\n"
+        "این شناسه را برای دوستانت بفرست."
+    )
+
+
+# =========================================================
+# JOIN GROUP
+# =========================================================
+
+@dp.message(Command("joingroup"))
+async def join_group(message: Message):
+    user_id = await ensure_player(message)
+
+    parts = message.text.split()
+
+    if len(parts) != 2:
+        await message.answer(
+            "❌ مثال:\n"
+            "<code>/joingroup 12</code>"
+        )
+        return
+
+    try:
+        group_id = int(parts[1])
+    except ValueError:
+        await message.answer(
+            "❌ شناسه گروه اشتباه است."
+        )
+        return
+
+    async with db_pool.acquire() as conn:
+        group = await conn.fetchrow(
+            """
+            SELECT *
+            FROM groups
+            WHERE id=$1
+            """,
+            group_id,
+        )
+
+        if not group:
+            await message.answer(
+                "❌ گروه پیدا نشد."
+            )
+            return
+
+        await conn.execute(
+            """
+            INSERT INTO group_members(
+                group_id,
+                user_id
+            )
+            VALUES($1,$2)
+            ON CONFLICT DO NOTHING
+            """,
+            group_id,
+            user_id,
+        )
+
+    await message.answer(
+        "✅ <b>وارد گروه شدی!</b>\n\n"
+        f"👥 گروه: {safe_text(group['name'])}\n"
+        f"🆔 شناسه: {group['id']}"
+    )
+
+
+# =========================================================
+# GROUPS SCREEN
+# =========================================================
+
 @dp.callback_query(F.data == "groups")
-async def groups_callback(callback: CallbackQuery):
+async def groups_callback(
+    callback: CallbackQuery
+):
     await callback.answer()
+
     user_id = callback.from_user.id
+
     await ensure_callback_player(user_id)
+
     async with db_pool.acquire() as conn:
         groups = await conn.fetch(
             """
-            SELECT g.id,g.name,g.owner_id,COUNT(gm2.user_id) AS members
-            FROM groups g JOIN group_members gm ON gm.group_id=g.id
-            LEFT JOIN group_members gm2 ON gm2.group_id=g.id
+            SELECT
+                g.id,
+                g.name,
+                g.owner_id,
+                COUNT(gm2.user_id) AS members
+            FROM groups g
+            JOIN group_members gm
+                ON gm.group_id=g.id
+            LEFT JOIN group_members gm2
+                ON gm2.group_id=g.id
             WHERE gm.user_id=$1
-            GROUP BY g.id,g.name,g.owner_id,g.created_at
+            GROUP BY
+                g.id,
+                g.name,
+                g.owner_id,
+                g.created_at
             ORDER BY g.created_at DESC
-            """, user_id
+            """,
+            user_id,
         )
+
     if not groups:
-        text="👥 <b>گروه‌ها</b>\n\nهنوز عضو هیچ گروهی نیستی."
+        text = (
+            "👥 <b>گروه‌ها</b>\n\n"
+            "هنوز عضو گروهی نیستی.\n\n"
+            "برای ساخت گروه:\n"
+            "<code>/creategroup نام گروه</code>\n\n"
+            "برای ورود:\n"
+            "<code>/joingroup GROUP_ID</code>"
+        )
+
     else:
-        parts=["👥 <b>گروه‌های من</b>\n"]
+        lines = [
+            "👥 <b>گروه‌های من</b>\n"
+        ]
+
         for group in groups:
-            owner="👑 سازنده" if group["owner_id"]==user_id else "👤 عضو"
-            parts.append(f"👥 {safe_text(group['name'])}\n👤 اعضا: {group['members']}\n{owner}")
-        text="\n\n".join(parts)
+            owner_text = (
+                "👑 سازنده"
+                if group["owner_id"] == user_id
+                else "👤 عضو"
+            )
+
+            lines.append(
+                f"👥 {safe_text(group['name'])}\n"
+                f"🆔 {group['id']}\n"
+                f"👤 اعضا: {group['members']}\n"
+                f"{owner_text}"
+            )
+
+        text = "\n\n".join(lines)
+
     await callback.message.edit_text(
         text,
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="➕ ساخت گروه", callback_data="group_create")],
-            [InlineKeyboardButton(text="🚪 ورود به گروه", callback_data="group_join")],
-            [InlineKeyboardButton(text="🏆 چالش‌های گروهی", callback_data="group_challenges")],
-            [InlineKeyboardButton(text="🔄 تازه‌سازی", callback_data="groups")],
-            [InlineKeyboardButton(text="🔙 بازگشت", callback_data="menu")],
-        ])
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="🏆 چالش‌های گروهی",
+                        callback_data="group_challenges",
+                    )
+                ],
+                [
+                    InlineKeyboardButton(
+                        text="🔙 بازگشت",
+                        callback_data="menu",
+                    )
+                ],
+            ]
+        ),
     )
-
-
-@dp.callback_query(F.data == "group_create")
-async def group_create_callback(callback: CallbackQuery):
-    await callback.answer()
-    GROUP_PENDING[callback.from_user.id] = "create"
-    await callback.message.edit_text(
-        "➕ <b>ساخت گروه</b>\n\nنام گروه را در یک پیام بفرست:",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🔙 بازگشت", callback_data="groups")]
-        ])
-    )
-
-
-@dp.callback_query(F.data == "group_join")
-async def group_join_callback(callback: CallbackQuery):
-    await callback.answer()
-    GROUP_PENDING[callback.from_user.id] = "join"
-    await callback.message.edit_text(
-        "🚪 <b>ورود به گروه</b>\n\nشناسه گروه را در یک پیام بفرست:",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🔙 بازگشت", callback_data="groups")]
-        ])
-    )
-
-
-@dp.message(F.text, lambda message: message.from_user.id in GROUP_PENDING)
-async def group_pending_text(message: Message):
-    user_id = message.from_user.id
-    action = GROUP_PENDING.get(user_id)
-    if action not in ("create", "join"):
-        # Let the normal unknown-text handler deal with unrelated messages.
-        return
-    await ensure_player(message)
-    value = message.text.strip()
-    if action == "create":
-        name = value[:40]
-        if len(name) < 2:
-            await message.answer("❌ نام گروه خیلی کوتاه است.")
-            return
-        async with db_pool.acquire() as conn:
-            async with conn.transaction():
-                group = await conn.fetchrow(
-                    "INSERT INTO groups(name,owner_id) VALUES($1,$2) RETURNING id", name, user_id
-                )
-                await conn.execute(
-                    "INSERT INTO group_members(group_id,user_id) VALUES($1,$2)", group["id"], user_id
-                )
-        GROUP_PENDING.pop(user_id, None)
-        await message.answer(
-            "✅ <b>گروه ساخته شد!</b>\n\n"
-            f"👥 نام: {safe_text(name)}\n"
-            f"🆔 شناسه گروه: {group['id']}\n\n"
-            "این شناسه را برای دوستانت بفرست.",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="👥 گروه‌های من", callback_data="groups")]
-            ])
-        )
-    else:
-        try:
-            group_id = int(value)
-        except ValueError:
-            await message.answer("❌ شناسه گروه باید عدد باشد.")
-            return
-        async with db_pool.acquire() as conn:
-            group = await conn.fetchrow("SELECT * FROM groups WHERE id=$1", group_id)
-            if not group:
-                await message.answer("❌ گروه پیدا نشد.")
-                return
-            await conn.execute(
-                "INSERT INTO group_members(group_id,user_id) VALUES($1,$2) ON CONFLICT DO NOTHING",
-                group_id, user_id
-            )
-        GROUP_PENDING.pop(user_id, None)
-        await message.answer(
-            "✅ <b>با موفقیت وارد گروه شدی!</b>\n\n"
-            f"👥 گروه: {safe_text(group['name'])}",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="👥 گروه‌های من", callback_data="groups")]
-            ])
-        )
 
 
 # =========================================================
@@ -3832,193 +3942,328 @@ async def create_challenge_callback(
 # =========================================================
 
 @dp.callback_query(F.data == "market")
-async def market_callback(callback: CallbackQuery):
+async def market_callback(
+    callback: CallbackQuery
+):
     await callback.answer()
+
     user_id = callback.from_user.id
+
     await ensure_callback_player(user_id)
 
     async with db_pool.acquire() as conn:
         offers = await conn.fetch(
             """
-            SELECT mo.*, p.first_name
+            SELECT
+                mo.*,
+                p.first_name
             FROM market_offers mo
-            JOIN players p ON p.user_id=mo.seller_id
+            JOIN players p
+                ON p.user_id=mo.seller_id
             WHERE mo.status='active'
             ORDER BY mo.created_at DESC
             LIMIT 10
             """
         )
 
-    lines = ["🏪 <b>بازار شهر</b>\n"]
     if not offers:
-        lines.append("بازار فعلاً خالی است.")
+        text = (
+            "🏪 <b>بازار شهر</b>\n\n"
+            "بازار فعلاً خالی است.\n\n"
+            "برای فروش منابع:\n"
+            "<code>/sell food 100 50</code>\n\n"
+            "یعنی ۱۰۰ غذا با قیمت کل ۵۰ سکه."
+        )
+
     else:
+        lines = [
+            "🏪 <b>بازار شهر</b>\n"
+        ]
+
         for offer in offers:
-            resource_name = MARKET_RESOURCES.get(offer["resource_type"], "منبع")
-            lines.append(
-                f"📦 {resource_name} × {offer['amount']:,}\n"
-                f"💰 قیمت: {offer['price']:,} سکه\n"
-                f"👤 فروشنده: {safe_text(offer['first_name'])}"
+            resource_name = MARKET_RESOURCES.get(
+                offer["resource_type"],
+                "منبع",
             )
 
-    buttons = []
-    for offer in offers:
-        resource_name = MARKET_RESOURCES.get(offer["resource_type"], "منبع")
-        buttons.append([InlineKeyboardButton(
-            text=f"🛒 خرید {resource_name} — {offer['price']:,} سکه",
-            callback_data=f"market_buy:{offer['id']}"
-        )])
-    buttons += [
-        [InlineKeyboardButton(text="📤 فروش منابع", callback_data="market_sell")],
-        [InlineKeyboardButton(text="🔄 تازه‌سازی بازار", callback_data="market")],
-        [InlineKeyboardButton(text="🔙 بازگشت", callback_data="menu")],
-    ]
+            lines.append(
+                f"🆔 پیشنهاد: {offer['id']}\n"
+                f"{resource_name} × "
+                f"{offer['amount']:,}\n"
+                f"💰 قیمت کل: "
+                f"{offer['price']:,}\n"
+                f"👤 فروشنده: "
+                f"{safe_text(offer['first_name'])}"
+            )
+
+        text = "\n\n".join(lines)
+
+    text += (
+        "\n\n━━━━━━━━━━━━\n\n"
+        "🛒 خرید:\n"
+        "<code>/buy OFFER_ID</code>\n\n"
+        "📤 فروش:\n"
+        "<code>/sell RESOURCE AMOUNT PRICE</code>\n\n"
+        "منابع قابل معامله:\n"
+        "food | materials | energy | water | equipment"
+    )
+
     await callback.message.edit_text(
-        "\n\n".join(lines),
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
+        text,
+        reply_markup=back_keyboard(),
     )
 
 
-@dp.callback_query(F.data == "market_sell")
-async def market_sell_callback(callback: CallbackQuery):
-    await callback.answer()
-    await callback.message.edit_text(
-        "📤 <b>فروش منابع</b>\n\nمنبع موردنظر را انتخاب کن:",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🍞 غذا", callback_data="market_res:food")],
-            [InlineKeyboardButton(text="🧱 مصالح", callback_data="market_res:materials")],
-            [InlineKeyboardButton(text="⚡ انرژی", callback_data="market_res:energy")],
-            [InlineKeyboardButton(text="💧 آب", callback_data="market_res:water")],
-            [InlineKeyboardButton(text="⚙️ تجهیزات", callback_data="market_res:equipment")],
-            [InlineKeyboardButton(text="🔙 بازگشت به بازار", callback_data="market")],
-        ])
-    )
+@dp.message(Command("sell"))
+async def sell_command(message: Message):
+    user_id = await ensure_player(message)
 
+    parts = message.text.split()
 
-@dp.callback_query(F.data.startswith("market_res:"))
-async def market_resource_callback(callback: CallbackQuery):
-    await callback.answer()
-    resource = callback.data.split(":", 1)[1]
-    if resource not in MARKET_RESOURCES:
+    if len(parts) != 4:
+        await message.answer(
+            "❌ مثال:\n"
+            "<code>/sell food 100 50</code>"
+        )
         return
-    MARKET_PENDING[callback.from_user.id] = {"resource": resource}
-    await callback.message.edit_text(
-        f"📤 <b>{MARKET_RESOURCES[resource]}</b>\n\nمقدار را انتخاب کن:",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🔹 ۱۰ واحد", callback_data="market_amt:10"),
-             InlineKeyboardButton(text="🔹 ۵۰ واحد", callback_data="market_amt:50")],
-            [InlineKeyboardButton(text="🔹 ۱۰۰ واحد", callback_data="market_amt:100"),
-             InlineKeyboardButton(text="🔹 ۵۰۰ واحد", callback_data="market_amt:500")],
-            [InlineKeyboardButton(text="🔙 بازگشت", callback_data="market_sell")],
-        ])
-    )
 
+    resource_type = parts[1].lower()
 
-@dp.callback_query(F.data.startswith("market_amt:"))
-async def market_amount_callback(callback: CallbackQuery):
-    await callback.answer()
-    user_id = callback.from_user.id
-    pending = MARKET_PENDING.get(user_id)
-    if not pending:
-        await callback.answer("لطفاً دوباره از بازار شروع کن.", show_alert=True)
+    if resource_type not in MARKET_RESOURCES:
+        await message.answer(
+            "❌ این منبع قابل معامله نیست."
+        )
         return
-    amount = int(callback.data.split(":", 1)[1])
-    pending["amount"] = amount
-    await callback.message.edit_text(
-        f"📦 مقدار انتخابی: {amount:,}\n\nقیمت کل را انتخاب کن:",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="💰 ۵۰ سکه", callback_data="market_price:50"),
-             InlineKeyboardButton(text="💰 ۱۰۰ سکه", callback_data="market_price:100")],
-            [InlineKeyboardButton(text="💰 ۲۰۰ سکه", callback_data="market_price:200"),
-             InlineKeyboardButton(text="💰 ۵۰۰ سکه", callback_data="market_price:500")],
-            [InlineKeyboardButton(text="🔙 بازگشت", callback_data="market_sell")],
-        ])
-    )
 
-
-@dp.callback_query(F.data.startswith("market_price:"))
-async def market_price_callback(callback: CallbackQuery):
-    await callback.answer()
-    user_id = callback.from_user.id
-    pending = MARKET_PENDING.pop(user_id, None)
-    if not pending:
-        await callback.answer("لطفاً دوباره از بازار شروع کن.", show_alert=True)
+    try:
+        amount = int(parts[2])
+        price = int(parts[3])
+    except ValueError:
+        await message.answer(
+            "❌ مقدار و قیمت باید عدد باشند."
+        )
         return
-    price = int(callback.data.split(":", 1)[1])
-    resource_type = pending["resource"]
-    amount = pending["amount"]
+
+    if amount <= 0 or price <= 0:
+        await message.answer(
+            "❌ مقدار و قیمت باید بیشتر از صفر باشند."
+        )
+        return
+
+    if amount > 100000 or price > 1000000:
+        await message.answer(
+            "❌ مقدار معامله بیش از حد مجاز است."
+        )
+        return
 
     async with db_pool.acquire() as conn:
         async with conn.transaction():
             resources = await conn.fetchrow(
-                "SELECT * FROM resources WHERE user_id=$1 FOR UPDATE", user_id
-            )
-            if not resources or resources[resource_type] < amount:
-                await callback.message.answer("❌ منابع کافی برای این فروش نداری.")
-                return
-            await conn.execute(
-                f"UPDATE resources SET {resource_type}={resource_type}-$1 WHERE user_id=$2",
-                amount, user_id
-            )
-            offer = await conn.fetchrow(
-                """INSERT INTO market_offers(seller_id, resource_type, amount, price)
-                   VALUES($1,$2,$3,$4) RETURNING id""",
-                user_id, resource_type, amount, price
+                """
+                SELECT *
+                FROM resources
+                WHERE user_id=$1
+                FOR UPDATE
+                """,
+                user_id,
             )
 
-    await callback.message.edit_text(
-        "✅ <b>عرضه در بازار انجام شد!</b>\n\n"
-        f"📦 {MARKET_RESOURCES[resource_type]}: {amount:,}\n"
-        f"💰 قیمت کل: {price:,} سکه",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🏪 بازگشت به بازار", callback_data="market")]
-        ])
+            if not resources:
+                await message.answer(
+                    "❌ منابع پیدا نشد."
+                )
+                return
+
+            if resources[resource_type] < amount:
+                await message.answer(
+                    "❌ منابع کافی برای فروش نداری."
+                )
+                return
+
+            await conn.execute(
+                f"""
+                UPDATE resources
+                SET {resource_type}=
+                    {resource_type}-$1
+                WHERE user_id=$2
+                """,
+                amount,
+                user_id,
+            )
+
+            offer = await conn.fetchrow(
+                """
+                INSERT INTO market_offers(
+                    seller_id,
+                    resource_type,
+                    amount,
+                    price
+                )
+                VALUES($1,$2,$3,$4)
+                RETURNING id
+                """,
+                user_id,
+                resource_type,
+                amount,
+                price,
+            )
+
+    await message.answer(
+        "📤 <b>عرضه در بازار انجام شد!</b>\n\n"
+        f"🆔 شناسه پیشنهاد: "
+        f"<code>{offer['id']}</code>\n\n"
+        f"{MARKET_RESOURCES[resource_type]}: "
+        f"{amount:,}\n"
+        f"💰 قیمت کل: {price:,} سکه"
     )
 
 
-@dp.callback_query(F.data.startswith("market_buy:"))
-async def market_buy_callback(callback: CallbackQuery):
-    await callback.answer()
-    user_id = await ensure_callback_player(callback.from_user.id)
+@dp.message(Command("buy"))
+async def buy_command(message: Message):
+    user_id = await ensure_player(message)
+
+    parts = message.text.split()
+
+    if len(parts) != 2:
+        await message.answer(
+            "❌ مثال:\n"
+            "<code>/buy 15</code>"
+        )
+        return
+
     try:
-        offer_id = int(callback.data.split(":", 1)[1])
+        offer_id = int(parts[1])
     except ValueError:
-        await callback.answer("پیشنهاد نامعتبر است.", show_alert=True)
+        await message.answer(
+            "❌ شناسه پیشنهاد اشتباه است."
+        )
         return
 
     async with db_pool.acquire() as conn:
         async with conn.transaction():
-            offer = await conn.fetchrow("SELECT * FROM market_offers WHERE id=$1 FOR UPDATE", offer_id)
-            if not offer or offer["status"] != "active":
-                await callback.answer("این پیشنهاد دیگر فعال نیست.", show_alert=True)
-                return
-            if offer["seller_id"] == user_id:
-                await callback.answer("نمی‌توانی پیشنهاد خودت را بخری.", show_alert=True)
-                return
-            ids = sorted([user_id, offer["seller_id"]])
-            rows = await conn.fetch(
-                "SELECT * FROM resources WHERE user_id=ANY($1::bigint[]) ORDER BY user_id FOR UPDATE", ids
+            offer = await conn.fetchrow(
+                """
+                SELECT *
+                FROM market_offers
+                WHERE id=$1
+                FOR UPDATE
+                """,
+                offer_id,
             )
-            rm = {r["user_id"]: r for r in rows}
-            buyer, seller = rm.get(user_id), rm.get(offer["seller_id"])
-            if not buyer or not seller or buyer["coins"] < offer["price"]:
-                await callback.answer("سکه کافی نداری.", show_alert=True)
-                return
-            resource_type = offer["resource_type"]
-            await conn.execute("UPDATE resources SET coins=coins-$1 WHERE user_id=$2", offer["price"], user_id)
-            await conn.execute("UPDATE resources SET coins=coins+$1 WHERE user_id=$2", offer["price"], offer["seller_id"])
-            await conn.execute(f"UPDATE resources SET {resource_type}={resource_type}+$1 WHERE user_id=$2", offer["amount"], user_id)
-            await conn.execute("UPDATE market_offers SET status='sold' WHERE id=$1", offer_id)
 
-    await add_xp(user_id, 15)
-    await callback.message.edit_text(
-        "🛒 <b>خرید با موفقیت انجام شد!</b>\n\n"
+            if (
+                not offer
+                or offer["status"] != "active"
+            ):
+                await message.answer(
+                    "❌ این پیشنهاد دیگر فعال نیست."
+                )
+                return
+
+            if offer["seller_id"] == user_id:
+                await message.answer(
+                    "❌ نمی‌توانی پیشنهاد خودت را بخری."
+                )
+                return
+
+            ids = sorted(
+                [
+                    user_id,
+                    offer["seller_id"],
+                ]
+            )
+
+            resource_rows = await conn.fetch(
+                """
+                SELECT *
+                FROM resources
+                WHERE user_id=ANY($1::bigint[])
+                ORDER BY user_id
+                FOR UPDATE
+                """,
+                ids,
+            )
+
+            resource_map = {
+                row["user_id"]: row
+                for row in resource_rows
+            }
+
+            buyer = resource_map.get(
+                user_id
+            )
+
+            seller = resource_map.get(
+                offer["seller_id"]
+            )
+
+            if not buyer or not seller:
+                await message.answer(
+                    "❌ اطلاعات منابع پیدا نشد."
+                )
+                return
+
+            if buyer["coins"] < offer["price"]:
+                await message.answer(
+                    "❌ سکه کافی نداری."
+                )
+                return
+
+            resource_type = offer[
+                "resource_type"
+            ]
+
+            await conn.execute(
+                """
+                UPDATE resources
+                SET coins=coins-$1
+                WHERE user_id=$2
+                """,
+                offer["price"],
+                user_id,
+            )
+
+            await conn.execute(
+                """
+                UPDATE resources
+                SET coins=coins+$1
+                WHERE user_id=$2
+                """,
+                offer["price"],
+                offer["seller_id"],
+            )
+
+            await conn.execute(
+                f"""
+                UPDATE resources
+                SET {resource_type}=
+                    {resource_type}+$1
+                WHERE user_id=$2
+                """,
+                offer["amount"],
+                user_id,
+            )
+
+            await conn.execute(
+                """
+                UPDATE market_offers
+                SET status='sold'
+                WHERE id=$1
+                """,
+                offer_id,
+            )
+
+    await add_xp(
+        user_id,
+        15,
+    )
+
+    await message.answer(
+        "🛒 <b>خرید موفق بود!</b>\n\n"
         f"📦 {MARKET_RESOURCES[offer['resource_type']]}\n"
-        f"مقدار: {offer['amount']:,}\n"
-        f"💰 پرداخت: {offer['price']:,} سکه\n\n⭐ امتیاز تجربه: +۱۵",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🏪 بازگشت به بازار", callback_data="market")]
-        ])
+        f"مقدار: {offer['amount']:,}\n\n"
+        f"💰 پرداخت: {offer['price']:,} سکه\n\n"
+        "⭐ +15 XP"
     )
 
 
@@ -5138,6 +5383,35 @@ async def natural_later_callback(callback: CallbackQuery):
 # BACKGROUND GAME TICK
 # =========================================================
 
+async def complete_building_constructions():
+    now = now_utc()
+    async with db_pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT id, user_id, building_type, target_level FROM building_constructions WHERE completed=FALSE AND ready_at <= $1 ORDER BY ready_at LIMIT 100",
+            now,
+        )
+    for row in rows:
+        async with db_pool.acquire() as conn:
+            async with conn.transaction():
+                locked = await conn.fetchrow(
+                    "SELECT * FROM building_constructions WHERE id=$1 AND completed=FALSE FOR UPDATE", row["id"]
+                )
+                if not locked:
+                    continue
+                await conn.execute(
+                    "INSERT INTO buildings(user_id, building_type, level) VALUES($1,$2,$3) ON CONFLICT(user_id,building_type) DO UPDATE SET level=EXCLUDED.level",
+                    row["user_id"], row["building_type"], row["target_level"],
+                )
+                await conn.execute("UPDATE building_constructions SET completed=TRUE WHERE id=$1", row["id"])
+                name = BUILDINGS.get(row["building_type"], {}).get("name", "ساختمان")
+                await conn.execute("INSERT INTO news(user_id,text) VALUES($1,$2)", row["user_id"], f"🎉 {name} با موفقیت به سطح {row['target_level']} رسید.")
+        try:
+            await recalculate_city(row["user_id"])
+            await bot.send_message(row["user_id"], f"🎉 <b>ارتقای ساختمان تمام شد!</b>\n\n{safe_text(name)} اکنون در <b>سطح {row['target_level']}</b> قرار دارد.")
+        except Exception:
+            logging.exception("Could not notify completed construction")
+
+
 async def game_tick():
     """
     حلقه اصلی بازی.
@@ -5150,6 +5424,7 @@ async def game_tick():
 
     while True:
         try:
+            await complete_building_constructions()
             await create_daily_disaster_schedule()
             await trigger_due_natural_disasters()
             await process_weekly_payout()
@@ -5437,9 +5712,11 @@ async def commands_command(
         "<code>/friends</code>\n"
         "<code>/help PLAYER_ID COINS FOOD MATERIALS</code>\n\n"
         "👥 <b>گروه:</b>\n"
-        "ساخت و ورود به گروه از طریق دکمه‌های بخش گروه‌ها انجام می‌شود.\n\n"
+        "<code>/creategroup نام گروه</code>\n"
+        "<code>/joingroup GROUP_ID</code>\n\n"
         "🏪 <b>بازار:</b>\n"
-        "خرید و فروش منابع کاملاً از طریق دکمه‌های بازار انجام می‌شود.\n\n"
+        "<code>/sell food 100 50</code>\n"
+        "<code>/buy OFFER_ID</code>\n\n"
         "برای بقیه امکانات از منوی اصلی استفاده کن.",
         reply_markup=main_keyboard(),
     )

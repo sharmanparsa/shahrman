@@ -62,6 +62,33 @@ class TelegramGroupMessageGuard(BaseMiddleware):
             text = (getattr(event, "text", None) or "").strip()
             if text == "شهر من":
                 return await handler(event, data)
+            # ثبت بی‌صدای شهردارهای موجود در گروه؛ ربات برای پیام‌های دیگر پاسخی نمی‌دهد.
+            user = getattr(event, "from_user", None)
+            if user and db_pool is not None:
+                try:
+                    async with db_pool.acquire() as conn:
+                        exists = await conn.fetchval("SELECT 1 FROM players WHERE user_id=$1", user.id)
+                        if exists:
+                            await conn.execute(
+                                """
+                                INSERT INTO telegram_group_mayors(chat_id,user_id,username,first_name,last_seen)
+                                VALUES($1,$2,$3,$4,NOW())
+                                ON CONFLICT(chat_id,user_id) DO UPDATE SET
+                                    username=EXCLUDED.username, first_name=EXCLUDED.first_name, last_seen=NOW()
+                                """,
+                                chat.id, user.id, user.username, user.first_name or ""
+                            )
+                            await conn.execute(
+                                """
+                                INSERT INTO telegram_groups(chat_id,title,bot_is_admin,updated_at)
+                                VALUES($1,$2,TRUE,NOW())
+                                ON CONFLICT(chat_id) DO UPDATE SET
+                                    title=EXCLUDED.title, bot_is_admin=TRUE, updated_at=NOW()
+                                """,
+                                chat.id, getattr(chat, "title", None) or "گروه تلگرام"
+                            )
+                except Exception:
+                    pass
             reply = getattr(event, "reply_to_message", None)
             user = getattr(event, "from_user", None)
             if reply and user and (chat.id, user.id) in group_transfer_state:
@@ -3989,16 +4016,14 @@ async def process_telegram_group_reply(message: Message):
 async def telegram_group_transfer_reply_router(message: Message):
     key = (message.chat.id, message.from_user.id)
     state = group_transfer_state.get(key)
-    if not state or state.get("step") not in {"resource", "amount"} or state.get("prompt_id") != message.reply_to_message.message_id:
+    if not state or state.get("prompt_id") != message.reply_to_message.message_id:
         return
-    await process_telegram_group_reply(message)
 
+    if state["step"] in {"resource", "amount"}:
+        await process_telegram_group_reply(message)
+        return
 
-@dp.message(lambda m: m.chat.type in {"group", "supergroup"} and bool(m.reply_to_message) and bool(m.text))
-async def telegram_group_transfer_recipient_id(message: Message):
-    key = (message.chat.id, message.from_user.id)
-    state = group_transfer_state.get(key)
-    if not state or state.get("step") != "recipient_id" or state.get("prompt_id") != message.reply_to_message.message_id:
+    if state["step"] != "recipient_id":
         return
 
     target = message.text.strip()
@@ -4011,22 +4036,27 @@ async def telegram_group_transfer_recipient_id(message: Message):
         await message.reply("❌ نام کاربری معتبر نیست. مثلاً @username را بفرست.", reply_markup=ForceReply(selective=True))
         return
 
-    if message.from_user.username and username.lower() == message.from_user.username.lower():
+    sender_username = message.from_user.username or ""
+    if sender_username.lower() == username.lower():
         await message.reply("❌ نمی‌توانی دارایی را به شهر خودت انتقال بدهی. @username یک شهردار دیگر را بفرست.", reply_markup=ForceReply(selective=True))
         return
 
     async with db_pool.acquire() as conn:
         recipient = await conn.fetchrow(
             """
-            SELECT gm.user_id, gm.first_name, gm.username, c.city_name
-            FROM telegram_group_mayors gm
-            LEFT JOIN cities c ON c.user_id=gm.user_id
-            WHERE gm.chat_id=$1 AND LOWER(gm.username)=LOWER($2)
+            SELECT p.user_id, p.first_name, p.username, c.city_name
+            FROM players p
+            LEFT JOIN cities c ON c.user_id=p.user_id
+            INNER JOIN telegram_group_mayors gm
+                ON gm.user_id=p.user_id AND gm.chat_id=$1
+            WHERE LOWER(COALESCE(p.username,''))=LOWER($2)
+              AND c.user_id IS NOT NULL
+            LIMIT 1
             """,
             message.chat.id, username,
         )
 
-    if not recipient or not recipient["city_name"]:
+    if not recipient:
         await message.reply("❌ این شخص شهر ندارد.", reply_markup=ForceReply(selective=True))
         return
 
@@ -4041,7 +4071,7 @@ async def telegram_group_transfer_recipient_id(message: Message):
             if not src or src[resource_type] < amount:
                 await message.reply(f"❌ موجودی تو تغییر کرده و کافی نیست. موجودی فعلی: <b>{(src[resource_type] if src else 0):,}</b>")
                 group_transfer_state.pop(key, None)
-                return True
+                return
             await conn.execute(
                 f"UPDATE resources SET {resource_type}={resource_type}-$1 WHERE user_id=$2",
                 amount, message.from_user.id,
@@ -4051,17 +4081,16 @@ async def telegram_group_transfer_recipient_id(message: Message):
                 INSERT INTO group_transfers(chat_id,sender_id,recipient_id,resource_type,amount,deliver_at)
                 VALUES($1,$2,$3,$4,$5,$6)
                 """,
-                message.chat.id, message.from_user.id, rid, resource_type, amount, deliver_at,
+                message.chat.id, message.from_user.id, recipient["user_id"], resource_type, amount, deliver_at,
             )
 
     group_transfer_state.pop(key, None)
     recipient_name = recipient["first_name"] or (f"@{recipient['username']}" if recipient["username"] else "شهردار مقصد")
     await message.reply(
         f"🚚 <b>کامیون بارگیری شد!</b>\n\n"
-        f"{TRANSFER_RESOURCES[resource_type]}: <b>{amount:,}</b>\n\n"
-        f"کامیون در حال حرکت به سمت شهر <b>{safe_text(recipient_name)}</b> است.\n"
-        f"⏳ زمان رسیدن: <b>{delay} دقیقه</b>\n\n"
-        "پس از رسیدن، دارایی به موجودی شهر مقصد اضافه می‌شود."
+        f"{TRANSFER_RESOURCES[resource_type]}: <b>{amount:,}</b>\n"
+        f"🏙️ در حال انتقال به شهر <b>{safe_text(recipient_name)}</b> هستیم.\n"
+        f"⏳ زمان رسیدن: <b>{delay} دقیقه</b>"
     )
 
 

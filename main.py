@@ -2,9 +2,16 @@ import asyncio
 import logging
 import os
 import random
+import hashlib
+import hmac
+import json
+from urllib.parse import parse_qsl
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from html import escape
+from io import BytesIO
+
+from PIL import Image, ImageDraw, ImageFont
 
 import asyncpg
 from aiohttp import web
@@ -22,6 +29,8 @@ from aiogram.types import (
     ForceReply,
     ReplyKeyboardMarkup,
     KeyboardButton,
+    BufferedInputFile,
+    WebAppInfo,
 )
 from dotenv import load_dotenv
 
@@ -34,6 +43,7 @@ load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 DATABASE_URL = os.getenv("DATABASE_URL")
 PORT = int(os.getenv("PORT", "10000"))
+WEBAPP_URL = (os.getenv("WEBAPP_URL") or os.getenv("RENDER_EXTERNAL_URL") or "").rstrip("/")
 
 if not BOT_TOKEN:
     raise RuntimeError("BOT_TOKEN is missing")
@@ -583,23 +593,23 @@ def main_keyboard():
                 ),
                 InlineKeyboardButton(
                     text="🏗️ ساختمان‌ها",
-                    callback_data="buildings",
+                    callback_data="buildings_visual",
                 ),
             ],
             [
                 InlineKeyboardButton(
                     text="📦 منابع",
-                    callback_data="resources",
+                    callback_data="resources_visual",
                 ),
                 InlineKeyboardButton(
                     text="💰 اقتصاد",
-                    callback_data="economy",
+                    callback_data="economy_visual",
                 ),
             ],
             [
                 InlineKeyboardButton(
                     text="🚨 بحران‌ها",
-                    callback_data="crises",
+                    callback_data="crises_visual",
                 ),
                 InlineKeyboardButton(
                     text="🤝 اجتماعی",
@@ -625,7 +635,7 @@ def main_keyboard():
             [
                 InlineKeyboardButton(
                     text="🗺️ توسعه شهر",
-                    callback_data="expansion",
+                    callback_data="expansion_visual",
                 ),
             ],
         ]
@@ -1651,6 +1661,342 @@ async def collect_income(user_id):
 
 
 # =========================================================
+# VISUAL CITY DASHBOARD
+# =========================================================
+
+CITY_FONT = "/usr/share/fonts/truetype/noto/NotoSansArabicUI-Regular.ttf"
+CITY_FONT_BOLD = "/usr/share/fonts/truetype/noto/NotoSansArabicUI-Bold.ttf"
+
+
+def _city_font(size, bold=False):
+    path = CITY_FONT_BOLD if bold else CITY_FONT
+    try:
+        return ImageFont.truetype(path, size)
+    except Exception:
+        return ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", size)
+
+
+def _draw_centered(draw, xy, text, font, fill):
+    box = draw.textbbox((0, 0), text, font=font)
+    w = box[2] - box[0]
+    h = box[3] - box[1]
+    draw.text((xy[0] - w / 2, xy[1] - h / 2), text, font=font, fill=fill)
+
+
+def _building_visuals(levels):
+    # ساختمان‌های قابل تشخیص روی تصویر شهر؛ سطح بالاتر = ساختمان بزرگ‌تر.
+    return [
+        ("police", "🚓", (130, 470), 1),
+        ("fire", "🚒", (270, 455), 1),
+        ("hospital", "🏥", (420, 430), 2),
+        ("power", "⚡", (600, 450), 1),
+        ("water", "💧", (740, 455), 1),
+        ("school", "🏫", (875, 455), 1),
+    ]
+
+
+def render_city_dashboard(city, player, resources, building_levels):
+    """ساخت تصویر سبک مینی‌گیم برای صفحه اصلی شهر؛ بدون تغییر در منطق بازی."""
+    W, H = 1080, 720
+    img = Image.new("RGB", (W, H), (205, 225, 238))
+    d = ImageDraw.Draw(img)
+
+    # آسمان و غروب
+    d.rectangle((0, 0, W, 390), fill=(145, 193, 220))
+    d.ellipse((820, 45, 970, 195), fill=(247, 203, 108))
+    d.rectangle((0, 390, W, H), fill=(91, 126, 83))
+
+    # کوه‌های دوردست
+    d.polygon([(0,390),(150,260),(280,390),(410,235),(560,390),(720,255),(900,390),(1080,245),(1080,420),(0,420)], fill=(105,126,135))
+    d.polygon([(0,390),(180,305),(330,390),(500,285),(650,390),(830,300),(1010,390),(1080,350),(1080,430),(0,430)], fill=(125,143,147))
+
+    # شهرک و خیابان اصلی
+    d.polygon([(0,560),(1080,500),(1080,720),(0,720)], fill=(68,72,77))
+    d.line((0,635,1080,585), fill=(236,201,91), width=6)
+    for x in range(30, 1080, 115):
+        d.rounded_rectangle((x, 600, x+60, 608), radius=4, fill=(230,230,230))
+
+    # ساختمان‌ها بر اساس سطح واقعی
+    base_x = [70, 220, 385, 555, 705, 865, 960]
+    types = ["police", "fire", "hospital", "power", "water", "school", "shopping"]
+    colors = [(67,84,104),(151,76,53),(196,198,202),(102,103,108),(86,151,176),(218,177,92),(139,91,135)]
+    for i, key in enumerate(types):
+        level = int(building_levels.get(key, 0) or 0)
+        if level <= 0:
+            continue
+        x = base_x[i]
+        bw = 105 + min(level, 5) * 7
+        bh = 80 + min(level, 5) * 25
+        y = 555 - bh
+        d.rounded_rectangle((x, y, x+bw, 555), radius=8, fill=colors[i], outline=(45,45,45), width=3)
+        # پنجره‌ها
+        for wx in range(x+15, x+bw-10, 28):
+            for wy in range(y+18, 540, 32):
+                d.rounded_rectangle((wx, wy, wx+12, wy+15), radius=2, fill=(242,211,118))
+        # نماد سطح
+        d.ellipse((x+bw-34, y+8, x+bw-8, y+34), fill=(28,35,43))
+        _draw_centered(d, (x+bw-21, y+21), str(level), _city_font(16, True), (255,255,255))
+
+    # پارک‌ها/درخت‌ها
+    for x, y in [(35,500),(335,515),(520,505),(825,520),(1010,500)]:
+        d.rectangle((x+14,y+28,x+20,y+70), fill=(92,66,45))
+        d.ellipse((x,y,x+48,y+48), fill=(48,104,65))
+        d.ellipse((x+10,y-12,x+52,y+38), fill=(58,125,74))
+
+    # لایه اطلاعات تصویری بالا
+    overlay = Image.new("RGBA", (W, 125), (17, 25, 34, 205))
+    img.paste(overlay, (0,0), overlay)
+    d = ImageDraw.Draw(img)
+    title_font = _city_font(36, True)
+    small = _city_font(21, True)
+    normal = _city_font(20)
+    city_name = str(city["city_name"] or "شهر من")
+    mayor = str(player["first_name"] or "شهردار")
+    _draw_centered(d, (W-190, 38), f"🏙️ {city_name}", title_font, (255,255,255))
+    _draw_centered(d, (W-160, 82), f"👑 {mayor}   ⭐ سطح {player['level']}", normal, (230,239,244))
+
+    stats = [
+        (f"👥 {city['population']:,}", (75, 50)),
+        (f"😊 {city['satisfaction']}%", (250, 50)),
+        (f"📈 {city['economy']}%", (420, 50)),
+        (f"💰 {resources['coins']:,}", (575, 50)),
+        (f"🧱 {resources['materials']:,}", (735, 50)),
+        (f"⚡ {resources['energy']:,}", (885, 50)),
+    ]
+    for txt, pos in stats:
+        d.rounded_rectangle((pos[0]-55, pos[1]+42, pos[0]+105, pos[1]+83), radius=13, fill=(255,255,255,35), outline=(210,225,235), width=1)
+        _draw_centered(d, (pos[0]+25, pos[1]+62), txt, small, (255,255,255))
+
+    # وضعیت بحران
+    if city["crisis"] and city["crisis"] > 0:
+        d.rounded_rectangle((35, 135, 390, 188), radius=16, fill=(132,43,38))
+        d.text((55, 145), "🚨 بحران فعال در شهر", font=_city_font(24, True), fill=(255,239,225))
+    else:
+        d.rounded_rectangle((35, 135, 390, 188), radius=16, fill=(37,91,67))
+        d.text((55, 145), "✅ شهر در وضعیت عادی", font=_city_font(24, True), fill=(231,255,239))
+
+    # قاب پایین
+    d.rounded_rectangle((25, 655, 1055, 705), radius=16, fill=(17,25,34))
+    _draw_centered(d, (540, 680), "🏗️ شهر در حال رشد است — ساختمان‌ها، منابع و بحران‌ها را مدیریت کن", _city_font(20, True), (242,242,242))
+
+    output = BytesIO()
+    img.save(output, format="JPEG", quality=90, optimize=True)
+    output.seek(0)
+    return output.getvalue()
+
+
+async def send_city_dashboard(chat_id, user_id, bot_instance=bot):
+    await recalculate_city(user_id)
+    city = await get_city(user_id)
+    player = await get_player(user_id)
+    resources = await get_resources(user_id)
+    if not city or not player or not resources:
+        await bot_instance.send_message(chat_id, "❌ اطلاعات شهر پیدا نشد.")
+        return
+
+    async with db_pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT building_type, level FROM buildings WHERE user_id=$1",
+            user_id,
+        )
+    levels = {r["building_type"]: r["level"] for r in rows}
+    image_bytes = render_city_dashboard(city, player, resources, levels)
+    caption = (
+        f"🏙️ <b>{safe_text(city['city_name'])}</b>\n"
+        f"👑 شهردار: {safe_text(player['first_name'] or 'شهردار')}\n\n"
+        f"👥 جمعیت: <b>{city['population']:,}</b>   😊 رضایت: <b>{city['satisfaction']}%</b>\n"
+        f"📈 اقتصاد: <b>{city['economy']}%</b>   ⭐ سطح: <b>{player['level']}</b>\n\n"
+        f"💰 {resources['coins']:,}   🧱 {resources['materials']:,}\n"
+        f"🍞 {resources['food']:,}   ⚡ {resources['energy']:,}\n"
+        f"💧 {resources['water']:,}   🧰 {resources['equipment']:,}"
+    )
+    await bot_instance.send_photo(
+        chat_id,
+        BufferedInputFile(image_bytes, filename="city_dashboard.jpg"),
+        caption=caption,
+        reply_markup=main_keyboard(),
+    )
+
+
+# =========================================================
+# VISUAL MINI-GAME PAGES
+# =========================================================
+
+def _rounded_card(d, box, fill=(20, 28, 38), outline=(90, 110, 125), radius=18, width=2):
+    d.rounded_rectangle(box, radius=radius, fill=fill, outline=outline, width=width)
+
+
+def render_buildings_page(city, building_levels, damages=None):
+    W, H = 1080, 760
+    img = Image.new("RGB", (W, H), (22, 29, 38))
+    d = ImageDraw.Draw(img)
+    d.rectangle((0,0,W,180), fill=(32,58,76))
+    _draw_centered(d,(540,52),"ساختمان های شهر",_city_font(38,True),(255,255,255))
+    _draw_centered(d,(540,105),f"سطح شهر: {city['city_level']}   |   زمین: {city['land']}   |   رضایت: {city['satisfaction']}%",_city_font(22,True),(214,229,237))
+    names=list(BUILDINGS.items())
+    cols=3
+    card_w,card_h=325,125
+    for i,(key,data) in enumerate(names):
+        col=i%cols; row=i//cols
+        x=35+col*350; y=205+row*145
+        level=int(building_levels.get(key,0) or 0)
+        _rounded_card(d,(x,y,x+card_w,y+card_h),fill=(31,41,52) if level else (25,30,37),outline=(79,142,106) if level else (70,75,82))
+        title=str(data['name']).replace('🚓 ','').replace('🚒 ','').replace('🏥 ','').replace('⚡ ','').replace('💧 ','').replace('🏫 ','').replace('🎓 ','').replace('🌳 ','').replace('🛍️ ','').replace('🏟️ ','').replace('♻️ ','').replace('🚑 ','').replace('🛣️ ','').replace('🗑️ ','').replace('🏭 ','').replace('🏘️ ','')
+        d.text((x+18,y+16),title,font=_city_font(23,True),fill=(255,255,255))
+        status=f"سطح {level}" if level else "ساخته نشده"
+        d.text((x+18,y+55),status,font=_city_font(21,True),fill=(125,232,160) if level else (190,195,200))
+        effect=data.get('description','')
+        d.text((x+18,y+88),effect[:30],font=_city_font(17),fill=(185,195,202))
+        if damages:
+            for dmg in damages:
+                if dmg['building_type']==key and not dmg['repaired']:
+                    d.rounded_rectangle((x+205,y+54,x+305,y+103),radius=10,fill=(125,48,43))
+                    d.text((x+215,y+67),f"خسارت {int(dmg['damage']):,}",font=_city_font(15,True),fill=(255,225,220))
+    return _jpeg_bytes(img)
+
+
+def render_crisis_page(city, crisis):
+    W,H=1080,760
+    img=Image.new('RGB',(W,H),(25,29,36)); d=ImageDraw.Draw(img)
+    d.rectangle((0,0,W,190),fill=(92,42,42) if crisis else (34,78,59))
+    _draw_centered(d,(540,55),'مرکز بحران شهر',_city_font(40,True),(255,255,255))
+    if crisis:
+        data=CRISES.get(crisis['crisis_type'],{})
+        name=str(data.get('name','بحران')).replace('🚨 ','').replace('🔥 ','').replace('💧 ','').replace('⚡ ','').replace('🌫️ ','').replace('🌨️ ','').replace('☀️ ','').replace('🗑️ ','').replace('📉 ','')
+        _draw_centered(d,(540,112),name,_city_font(30,True),(255,230,225))
+        cards=[('شدت',f"{crisis['severity']} / 100"),('خدمت اصلی',CRISIS_STAT_NAMES.get(data.get('stat',''),data.get('stat',''))),('پاداش',f"{data.get('reward',0):,} سکه"),('منبع لازم',data.get('resource',''))]
+    else:
+        _draw_centered(d,(540,115),'در حال حاضر بحرانی فعال نیست',_city_font(29,True),(222,255,231))
+        cards=[('رضایت',f"{city['satisfaction']}%"),('اقتصاد',f"{city['economy']}%"),('امنیت',f"{city['security']}%"),('مدیریت بحران',f"{city['crisis']}%")]
+    for i,(a,b) in enumerate(cards):
+        x=55+i*250
+        _rounded_card(d,(x,235,x+220,355),fill=(35,43,53),outline=(125,73,73) if crisis else (72,118,91))
+        _draw_centered(d,(x+110,270),a,_city_font(20,True),(180,193,202))
+        _draw_centered(d,(x+110,320),str(b)[:18],_city_font(22,True),(255,255,255))
+    _rounded_card(d,(60,400,1020,680),fill=(30,37,46),outline=(67,80,92))
+    lines=['برای مدیریت بحران، وضعیت خدمات شهر را تقویت کن.','هر بحران می تواند منابع و رضایت شهروندان را تحت تاثیر قرار دهد.','از دکمه های پایین برای اقدام یا بازگشت استفاده کن.']
+    for i,line in enumerate(lines):
+        _draw_centered(d,(540,465+i*60),line,_city_font(22,True),(220,228,233))
+    return _jpeg_bytes(img)
+
+
+def render_map_page(city, building_levels):
+    W,H=1080,760
+    img=Image.new('RGB',(W,H),(194,214,188)); d=ImageDraw.Draw(img)
+    d.rectangle((0,0,W,135),fill=(31,48,57))
+    _draw_centered(d,(540,45),'نقشه شهر',_city_font(40,True),(255,255,255))
+    _draw_centered(d,(540,92),f"زمین {city['land']}  |  روستاها {city['villages']}  |  سطح شهر {city['city_level']}",_city_font(22,True),(216,228,232))
+    # roads
+    for y in (270,455,625): d.rounded_rectangle((0,y-20,W,y+20),radius=8,fill=(76,82,82))
+    for x in (190,420,680,900): d.rounded_rectangle((x-18,135,x+18,720),radius=8,fill=(76,82,82))
+    # zones
+    zones=[(45,160,160,250,'مرکز شهر','city'),(235,160,405,250,'مسکونی','housing'),(470,160,650,250,'خدماتی','service'),(720,160,1030,250,'صنعتی','industry'),(45,335,320,430,'پارک و تفریح','park'),(370,335,620,430,'آموزش','school'),(680,335,1030,430,'تجاری','shopping'),(45,515,330,610,'حمل و نقل','roads'),(380,515,650,610,'آب و برق','utilities'),(700,515,1030,610,'زمین توسعه','expand')]
+    for x1,y1,x2,y2,title,key in zones:
+        built = (key=='industry' and building_levels.get('industry',0)>0) or (key=='housing' and building_levels.get('housing',0)>0) or (key=='park' and building_levels.get('park',0)>0) or (key=='school' and building_levels.get('school',0)>0) or (key=='shopping' and building_levels.get('shopping',0)>0) or (key=='roads' and building_levels.get('roads',0)>0) or (key=='utilities' and (building_levels.get('power',0)>0 or building_levels.get('water',0)>0))
+        fill=(75,121,86) if built else (113,121,104)
+        _rounded_card(d,(x1,y1,x2,y2),fill=fill,outline=(221,225,191))
+        _draw_centered(d,((x1+x2)//2,(y1+y2)//2),title,_city_font(21,True),(255,255,255))
+    return _jpeg_bytes(img)
+
+
+def render_resources_page(resources, city):
+    W,H=1080,760
+    img=Image.new('RGB',(W,H),(24,30,38)); d=ImageDraw.Draw(img)
+    d.rectangle((0,0,W,145),fill=(36,60,74))
+    _draw_centered(d,(540,50),'مرکز منابع شهر',_city_font(40,True),(255,255,255))
+    _draw_centered(d,(540,100),f"درآمد پایه شهر: ۲۰ واحد از هر منبع در هر ساعت",_city_font(21,True),(210,226,232))
+    labels=[('سکه','coins'),('غذا','food'),('مصالح','materials'),('انرژی','energy'),('آب','water'),('تجهیزات','equipment')]
+    for i,(label,key) in enumerate(labels):
+        col=i%2; row=i//2; x=70+col*500; y=185+row*170
+        _rounded_card(d,(x,y,x+440,y+135),fill=(34,43,53),outline=(83,103,116))
+        d.text((x+25,y+22),label,font=_city_font(25,True),fill=(245,248,250))
+        d.text((x+25,y+68),f"{resources[key]:,}",font=_city_font(32,True),fill=(129,226,161))
+        d.text((x+250,y+76),'+20 / ساعت پایه',font=_city_font(17,True),fill=(183,195,203))
+    return _jpeg_bytes(img)
+
+
+def _jpeg_bytes(img):
+    output=BytesIO(); img.save(output,format='JPEG',quality=90,optimize=True); output.seek(0); return output.getvalue()
+
+
+async def _send_visual_photo(callback, image_bytes, caption, keyboard):
+    try:
+        await callback.message.delete()
+    except Exception:
+        pass
+    await callback.message.answer_photo(BufferedInputFile(image_bytes, filename='city_page.jpg'), caption=caption, reply_markup=keyboard)
+
+
+def visual_back_row(target='city'):
+    return [
+        [InlineKeyboardButton(text='🏙️ شهر من', callback_data=target)],
+        [InlineKeyboardButton(text='🔙 منوی اصلی', callback_data='menu')],
+    ]
+
+
+@dp.callback_query(F.data == 'buildings_visual')
+async def buildings_visual_callback(callback: CallbackQuery):
+    await callback.answer()
+    user_id=await ensure_callback_player(callback.from_user.id)
+    await process_player_tick(user_id)
+    city=await get_city(user_id)
+    async with db_pool.acquire() as conn:
+        rows=await conn.fetch('SELECT building_type, level FROM buildings WHERE user_id=$1',user_id)
+        damages=await conn.fetch('SELECT building_type, damage, repaired FROM natural_disaster_events WHERE user_id=$1 AND repaired=FALSE ORDER BY created_at DESC',user_id)
+    levels={r['building_type']:r['level'] for r in rows}
+    img=render_buildings_page(city,levels,damages)
+    kb=[]
+    for key,data in BUILDINGS.items():
+        level=int(levels.get(key,0) or 0)
+        kb.append([InlineKeyboardButton(text=f"{data['name']} — {'سطح '+str(level) if level else 'ساخت'}",callback_data=f'building:{key}')])
+    kb += [[InlineKeyboardButton(text='🚨 خسارت‌ها و تعمیرات',callback_data='buildings')]] + visual_back_row()
+    await _send_visual_photo(callback,img,'🏗️ <b>شهر را بساز و ساختمان‌ها را مدیریت کن</b>',InlineKeyboardMarkup(inline_keyboard=kb))
+
+
+@dp.callback_query(F.data == 'crises_visual')
+async def crises_visual_callback(callback: CallbackQuery):
+    await callback.answer()
+    user_id=await ensure_callback_player(callback.from_user.id); await process_player_tick(user_id)
+    city=await get_city(user_id); crisis=await get_active_crisis(user_id)
+    img=render_crisis_page(city,crisis)
+    kb=[]
+    if crisis: kb.append([InlineKeyboardButton(text='🛠️ حل بحران',callback_data=f"resolve:{crisis['id']}")])
+    kb += [[InlineKeyboardButton(text='🔄 بروزرسانی بحران',callback_data='crises_visual')]] + visual_back_row()
+    caption='🚨 <b>بحران شهر</b>\nوضعیت بحران را از روی صفحه مدیریت کن.' if crisis else '🟢 <b>شهر آرام است</b>\nفعلاً بحران فعالی نداری.'
+    await _send_visual_photo(callback,img,caption,InlineKeyboardMarkup(inline_keyboard=kb))
+
+
+@dp.callback_query(F.data == 'expansion_visual')
+async def expansion_visual_callback(callback: CallbackQuery):
+    await callback.answer()
+    user_id=await ensure_callback_player(callback.from_user.id); city=await get_city(user_id)
+    async with db_pool.acquire() as conn:
+        rows=await conn.fetch('SELECT building_type, level FROM buildings WHERE user_id=$1',user_id)
+    levels={r['building_type']:r['level'] for r in rows}
+    img=render_map_page(city,levels)
+    needed=10+city['villages']*5; cost=2500+city['villages']*1500
+    kb=[[InlineKeyboardButton(text=f"🗺️ سطح شهر {city['city_level']} / {needed}",callback_data='expansion')],[InlineKeyboardButton(text=f"🏘️ جذب روستا — {cost:,} سکه",callback_data='expand_village')]]+visual_back_row()
+    await _send_visual_photo(callback,img,f"🗺️ <b>نقشه زنده شهر</b>\n🏘️ روستاهای جذب‌شده: {city['villages']}",InlineKeyboardMarkup(inline_keyboard=kb))
+
+
+@dp.callback_query(F.data == 'resources_visual')
+async def resources_visual_callback(callback: CallbackQuery):
+    await callback.answer(); user_id=await ensure_callback_player(callback.from_user.id); await process_player_tick(user_id)
+    resources=await get_resources(user_id); city=await get_city(user_id); img=render_resources_page(resources,city)
+    kb=[[InlineKeyboardButton(text='🔄 بروزرسانی',callback_data='resources_visual')],[InlineKeyboardButton(text='🏪 بازار',callback_data='market')]]+visual_back_row()
+    await _send_visual_photo(callback,img,'📦 <b>منابع شهر</b>\nمنابع واقعی شهر در این صفحه نمایش داده می‌شوند.',InlineKeyboardMarkup(inline_keyboard=kb))
+
+
+@dp.callback_query(F.data == 'economy_visual')
+async def economy_visual_callback(callback: CallbackQuery):
+    await callback.answer(); user_id=await ensure_callback_player(callback.from_user.id); await process_player_tick(user_id)
+    city=await get_city(user_id); resources=await get_resources(user_id)
+    img=render_resources_page(resources,city)
+    kb=[[InlineKeyboardButton(text='🏪 بازار',callback_data='market')],[InlineKeyboardButton(text='📦 منابع',callback_data='resources_visual')]]+visual_back_row()
+    await _send_visual_photo(callback,img,f"💰 <b>اقتصاد شهر</b>\n📈 اقتصاد: {city['economy']}%\n💰 سکه: {resources['coins']:,}",InlineKeyboardMarkup(inline_keyboard=kb))
+
+
+# =========================================================
 # CITY DASHBOARD
 # =========================================================
 
@@ -1975,17 +2321,11 @@ async def start_handler(message: Message):
     await process_player_tick(user_id)
     await collect_income(user_id)
 
-    text = await city_text(user_id)
-
     await message.answer(
         "🏙️ <b>به شهر من خوش اومدی!</b>\n\n"
-        "تو شهردار یک شهر کوچک هستی.\n"
-        "شهر رو بساز، اقتصاد رو رشد بده، "
-        "بحران‌ها رو مدیریت کن و با "
-        "شهرداران دیگر رقابت کن.\n\n"
-        + text,
-        reply_markup=main_keyboard(),
+        "تو شهردار یک شهر کوچک هستی. شهر رو بساز، اقتصاد رو رشد بده و بحران‌ها رو مدیریت کن!",
     )
+    await send_city_dashboard(message.chat.id, user_id)
 
     await message.answer(
         "برای ورود سریع به بازی از دکمه پایین استفاده کن. 🚀",
@@ -2006,15 +2346,12 @@ async def start_button_handler(message: Message):
 async def menu_callback(callback: CallbackQuery):
     await callback.answer()
 
-    await ensure_callback_player(
-        callback.from_user.id
-    )
-
-    await callback.message.edit_text(
-        "🏙️ <b>شهر من</b>\n\n"
-        "شهردار، شهر آماده مدیریت توئه!",
-        reply_markup=main_keyboard(),
-    )
+    user_id = await ensure_callback_player(callback.from_user.id)
+    try:
+        await callback.message.delete()
+    except Exception:
+        pass
+    await send_city_dashboard(callback.message.chat.id, user_id)
 
 
 # =========================================================
@@ -2026,14 +2363,17 @@ async def city_callback(callback: CallbackQuery):
     await callback.answer()
 
     user_id = callback.from_user.id
-
     await ensure_callback_player(user_id)
     await process_player_tick(user_id)
 
-    await callback.message.edit_text(
-        await city_text(user_id),
-        reply_markup=back_keyboard(),
-    )
+    try:
+        await callback.message.delete()
+    except Exception:
+        pass
+    if WEBAPP_URL:
+        await callback.message.answer("🎮 <b>شهر من</b>\n\nوارد شهر خودت شو و همه‌چیز را داخل مینی‌اپ مدیریت کن.", reply_markup=miniapp_keyboard())
+    else:
+        await send_city_dashboard(callback.message.chat.id, user_id)
 
 
 # =========================================================
@@ -2266,9 +2606,14 @@ async def building_handler(
     except Exception:
         logging.exception("Could not notify building construction start")
 
-    await callback.message.edit_text(
-        text
-        + f"\n\n⏳ {action} شروع شد."
+    if getattr(callback.message, "photo", None):
+        try:
+            await callback.message.delete()
+        except Exception:
+            pass
+        await callback.message.answer(
+            text
+            + f"\n\n⏳ {action} شروع شد."
         + f"\n🏗️ بعد از {duration_hours} ساعت، سطح {next_level} فعال می‌شود.",
         reply_markup=InlineKeyboardMarkup(
             inline_keyboard=[
@@ -2287,6 +2632,18 @@ async def building_handler(
             ]
         ),
     )
+    else:
+        await callback.message.edit_text(
+            text
+            + f"\n\n⏳ {action} شروع شد."
+            + f"\n🏗️ بعد از {duration_hours} ساعت، سطح {next_level} فعال می‌شود.",
+            reply_markup=InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [InlineKeyboardButton(text="🏗️ ساختمان‌ها", callback_data="buildings")],
+                    [InlineKeyboardButton(text="🔙 منو", callback_data="menu")],
+                ]
+            ),
+        )
 
 
 # =========================================================
@@ -2884,25 +3241,20 @@ async def resolve_crisis(
 
     await callback.answer()
 
-    await callback.message.edit_text(
-        result,
-        reply_markup=InlineKeyboardMarkup(
-            inline_keyboard=[
-                [
-                    InlineKeyboardButton(
-                        text="🚨 بحران‌ها",
-                        callback_data="crises",
-                    )
-                ],
-                [
-                    InlineKeyboardButton(
-                        text="🏙️ شهر من",
-                        callback_data="city",
-                    )
-                ],
-            ]
-        ),
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="🚨 بحران‌ها", callback_data="crises_visual")],
+            [InlineKeyboardButton(text="🏙️ شهر من", callback_data="city")],
+        ]
     )
+    if getattr(callback.message, "photo", None):
+        try:
+            await callback.message.delete()
+        except Exception:
+            pass
+        await callback.message.answer(result, reply_markup=keyboard)
+    else:
+        await callback.message.edit_text(result, reply_markup=keyboard)
 
 
 # =========================================================
@@ -4601,10 +4953,14 @@ async def expansion_callback(
         ]
     )
 
-    await callback.message.edit_text(
-        text,
-        reply_markup=keyboard,
-    )
+    if getattr(callback.message, "photo", None):
+        try:
+            await callback.message.delete()
+        except Exception:
+            pass
+        await callback.message.answer(text, reply_markup=keyboard)
+    else:
+        await callback.message.edit_text(text, reply_markup=keyboard)
 
 
 @dp.callback_query(
@@ -5754,6 +6110,146 @@ async def unknown_message(
     )
 
 
+
+# =========================================================
+# TELEGRAM MINI APP — شهر من
+# =========================================================
+
+def miniapp_keyboard():
+    if not WEBAPP_URL:
+        return main_keyboard()
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🎮 ورود به شهر من", web_app=WebAppInfo(url=WEBAPP_URL + "/webapp"))],
+        [InlineKeyboardButton(text="👑 شهردار", callback_data="mayor")],
+        [InlineKeyboardButton(text="🏪 بازار", callback_data="market")],
+    ])
+
+
+def _validate_webapp_init_data(init_data: str):
+    if not init_data or not BOT_TOKEN:
+        return None
+    try:
+        pairs = dict(parse_qsl(init_data, keep_blank_values=True))
+        received_hash = pairs.pop("hash", None)
+        if not received_hash:
+            return None
+        data_check = "\n".join(f"{k}={pairs[k]}" for k in sorted(pairs))
+        secret = hmac.new(b"WebAppData", BOT_TOKEN.encode(), hashlib.sha256).digest()
+        expected = hmac.new(secret, data_check.encode(), hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(expected, received_hash):
+            return None
+        auth_date = int(pairs.get("auth_date", "0"))
+        if auth_date and abs(int(datetime.now(timezone.utc).timestamp()) - auth_date) > 86400:
+            return None
+        user_obj = json.loads(pairs.get("user", "{}"))
+        return user_obj
+    except Exception:
+        return None
+
+
+async def _miniapp_user(request):
+    init_data = request.headers.get("X-Telegram-Init-Data", "")
+    user_obj = _validate_webapp_init_data(init_data)
+    if not user_obj or not user_obj.get("id"):
+        raise web.HTTPUnauthorized(text="Telegram WebApp authentication failed")
+    user_id = int(user_obj["id"])
+    await ensure_callback_player(user_id)
+    return user_id
+
+
+async def miniapp_state(request):
+    user_id = await _miniapp_user(request)
+    await process_player_tick(user_id)
+    await recalculate_city(user_id)
+    city = await get_city(user_id)
+    player = await get_player(user_id)
+    resources = await get_resources(user_id)
+    async with db_pool.acquire() as conn:
+        buildings = await conn.fetch("SELECT building_type, level FROM buildings WHERE user_id=$1 ORDER BY building_type", user_id)
+        active = await conn.fetchrow("SELECT * FROM crises WHERE user_id=$1 AND status='active' ORDER BY created_at DESC LIMIT 1", user_id)
+        construction = await conn.fetchrow("SELECT building_type,target_level,ready_at FROM building_constructions WHERE user_id=$1 AND completed=FALSE LIMIT 1", user_id)
+        offers = await conn.fetch("SELECT id,seller_id,resource,amount,price FROM market_offers WHERE status='active' ORDER BY id DESC LIMIT 20")
+    return web.json_response({
+        "city": dict(city) if city else {},
+        "player": {"first_name": player["first_name"] if player else "شهردار", "level": player["level"] if player else 1, "xp": player["xp"] if player else 0},
+        "resources": dict(resources) if resources else {},
+        "buildings": [{"type": r["building_type"], "level": r["level"]} for r in buildings],
+        "crisis": dict(active) if active else None,
+        "construction": dict(construction) if construction else None,
+        "offers": [dict(r) for r in offers],
+    })
+
+
+async def miniapp_action(request):
+    user_id = await _miniapp_user(request)
+    try:
+        payload = await request.json()
+    except Exception:
+        raise web.HTTPBadRequest(text="Invalid JSON")
+    action = str(payload.get("action", ""))
+    if action == "build":
+        key = str(payload.get("building", ""))
+        data = BUILDINGS.get(key)
+        if not data:
+            return web.json_response({"ok": False, "message": "ساختمان پیدا نشد."}, status=400)
+        async with db_pool.acquire() as conn:
+            async with conn.transaction():
+                await conn.execute("SELECT pg_advisory_xact_lock($1)", int(user_id))
+                active = await conn.fetchrow("SELECT * FROM building_constructions WHERE user_id=$1 AND completed=FALSE FOR UPDATE", user_id)
+                if active:
+                    remain=max(0,int((active["ready_at"]-now_utc()).total_seconds()))
+                    return web.json_response({"ok":False,"message":f"⏳ ساخت {BUILDINGS[active['building_type']]['name']} هنوز تمام نشده؛ {remain//3600} ساعت و {(remain%3600)//60} دقیقه باقی مانده."}, status=400)
+                current=await conn.fetchval("SELECT level FROM buildings WHERE user_id=$1 AND building_type=$2 FOR UPDATE",user_id,key) or 0
+                cost=int(data["cost"]*(1+current*0.45)); material=int(data["material"]*(1+current*0.45))
+                duration=BUILDING_UPGRADE_HOURS.get(current,80 if current>=5 else 2)
+                res=await conn.fetchrow("SELECT coins,materials FROM resources WHERE user_id=$1 FOR UPDATE",user_id)
+                if res["coins"]<cost or res["materials"]<material:
+                    return web.json_response({"ok":False,"message":"❌ سکه یا مصالح کافی نیست."}, status=400)
+                await conn.execute("UPDATE resources SET coins=coins-$1, materials=materials-$2 WHERE user_id=$3",cost,material,user_id)
+                await conn.execute("INSERT INTO building_constructions(user_id,building_type,target_level,ready_at) VALUES($1,$2,$3,$4)",user_id,key,current+1,now_utc()+timedelta(hours=duration))
+        await add_xp(user_id,20)
+        return web.json_response({"ok":True,"message":f"🏗️ {data['name']} برای سطح {current+1} وارد مرحله ساخت/ارتقا شد. زمان: {duration} ساعت."})
+    if action == "resolve":
+        try: crisis_id=int(payload.get("crisis_id"))
+        except: return web.json_response({"ok":False,"message":"شناسه بحران نامعتبر است."},status=400)
+        async with db_pool.acquire() as conn:
+            async with conn.transaction():
+                await conn.execute("SELECT pg_advisory_xact_lock($1)",int(user_id))
+                crisis=await conn.fetchrow("SELECT * FROM crises WHERE id=$1 AND user_id=$2 FOR UPDATE",crisis_id,user_id)
+                if not crisis or crisis["status"]!="active": return web.json_response({"ok":False,"message":"این بحران فعال نیست."},status=400)
+                city=await conn.fetchrow("SELECT * FROM cities WHERE user_id=$1 FOR UPDATE",user_id); res=await conn.fetchrow("SELECT * FROM resources WHERE user_id=$1 FOR UPDATE",user_id)
+                data=CRISES.get(crisis["crisis_type"])
+                if not data: return web.json_response({"ok":False,"message":"نوع بحران نامعتبر است."},status=400)
+                required=max(20,crisis["severity"]*2); resource=data["resource"]
+                if res[resource]<required: return web.json_response({"ok":False,"message":f"❌ {resource} کافی نیست."},status=400)
+                chance=clamp(45+city[data["stat"]]//2,20,95)
+                if random.randint(1,100)>chance: return web.json_response({"ok":False,"message":"⚠️ عملیات مقابله ناموفق بود؛ دوباره تلاش کن."},status=400)
+                reward=data["reward"]+city["economy"]; eq=max(1,crisis["severity"]//20)
+                await conn.execute(f"UPDATE resources SET {resource}=GREATEST(0,{resource}-$1), coins=coins+$2, equipment=equipment+$3 WHERE user_id=$4",required,reward,eq,user_id)
+                await conn.execute("UPDATE crises SET status='resolved', resolved_at=NOW() WHERE id=$1",crisis_id)
+                await conn.execute("UPDATE cities SET satisfaction=LEAST(100,satisfaction+2), economy=LEAST(100,economy+2), population=population+3 WHERE user_id=$1",user_id)
+        await add_xp(user_id,30)
+        return web.json_response({"ok":True,"message":"✅ بحران با موفقیت مدیریت شد! رضایت، اقتصاد و جمعیت شهر افزایش یافت."})
+    if action == "expand_village":
+        async with db_pool.acquire() as conn:
+            async with conn.transaction():
+                city=await conn.fetchrow("SELECT * FROM cities WHERE user_id=$1 FOR UPDATE",user_id)
+                needed=10+city["villages"]*5; cost=2500+city["villages"]*1500
+                res=await conn.fetchrow("SELECT coins FROM resources WHERE user_id=$1 FOR UPDATE",user_id)
+                if city["city_level"]<needed: return web.json_response({"ok":False,"message":f"❌ سطح شهر باید حداقل {needed} باشد."},status=400)
+                if res["coins"]<cost: return web.json_response({"ok":False,"message":"❌ سکه کافی نیست."},status=400)
+                await conn.execute("UPDATE resources SET coins=coins-$1 WHERE user_id=$2",cost,user_id)
+                await conn.execute("UPDATE cities SET villages=villages+1,land=land+1,housing_capacity=housing_capacity+200,population=population+50 WHERE user_id=$1",user_id)
+        return web.json_response({"ok":True,"message":"🏘️ روستا با موفقیت به شهر اضافه شد."})
+    return web.json_response({"ok":False,"message":"عملیات ناشناخته است."},status=400)
+
+
+async def miniapp_page(request):
+    from pathlib import Path
+    path=Path(__file__).with_name("webapp")/"index.html"
+    return web.FileResponse(path)
+
+
 # =========================================================
 # RENDER HEALTH SERVER
 # =========================================================
@@ -5776,6 +6272,11 @@ async def start_web_server():
         "/health",
         health,
     )
+
+    app.router.add_get("/webapp", miniapp_page)
+    app.router.add_get("/webapp/", miniapp_page)
+    app.router.add_get("/webapp/api/state", miniapp_state)
+    app.router.add_post("/webapp/api/action", miniapp_action)
 
     runner = web.AppRunner(
         app

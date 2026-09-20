@@ -565,9 +565,29 @@ def citizen_bar(value):
     return "🟩" * filled + "⬜" * empty
 
 
-def start_reply_keyboard():
+def _miniapp_link(user_id: int | None = None) -> str:
+    """Build the Mini App URL.
+
+    Telegram normally supplies WebApp initData, but some Telegram Android/WebView
+    versions can open the page without exposing initData to JavaScript.  The
+    signed uid/exp fallback below lets the server authenticate the exact user
+    who received this button, without trusting a plain user_id from the browser.
+    """
+    if not WEBAPP_URL:
+        return ""
+    base = WEBAPP_URL + "/webapp"
+    if not user_id:
+        return base
+    exp = int(datetime.now(timezone.utc).timestamp()) + 30 * 24 * 3600
+    payload = f"{int(user_id)}:{exp}"
+    sig = hmac.new(BOT_TOKEN.encode(), payload.encode(), hashlib.sha256).hexdigest()
+    version = int(datetime.now(timezone.utc).timestamp())
+    return f"{base}?v={version}&uid={int(user_id)}&exp={exp}&sig={sig}"
+
+
+def start_reply_keyboard(user_id: int | None = None):
     # فقط یک دکمه برای ورود مستقیم به Mini App؛ منوهای قدیمی داخل چت نمایش داده نمی‌شوند.
-    url = (WEBAPP_URL + "/webapp") if WEBAPP_URL else ""
+    url = _miniapp_link(user_id)
     return ReplyKeyboardMarkup(
         keyboard=[[KeyboardButton(text="🎮 ورود به شهر من", web_app=WebAppInfo(url=url))]] if url else [[KeyboardButton(text="🎮 ورود به شهر من")]],
         resize_keyboard=True,
@@ -2323,7 +2343,7 @@ async def start_handler(message: Message):
         await message.answer(
             "🏙️ <b>شهر من</b>\n\n"
             "شهرت آماده است. همه امکانات بازی را از داخل مینی‌اپ مدیریت کن. 🎮",
-            reply_markup=start_reply_keyboard(),
+            reply_markup=start_reply_keyboard(message.from_user.id),
         )
     else:
         await message.answer(
@@ -2370,7 +2390,7 @@ async def city_callback(callback: CallbackQuery):
     except Exception:
         pass
     if WEBAPP_URL:
-        await callback.message.answer("🎮 <b>شهر من</b>\n\nوارد شهر خودت شو و همه‌چیز را داخل مینی‌اپ مدیریت کن.", reply_markup=miniapp_keyboard())
+        await callback.message.answer("🎮 <b>شهر من</b>\n\nوارد شهر خودت شو و همه‌چیز را داخل مینی‌اپ مدیریت کن.", reply_markup=miniapp_keyboard(user_id))
     else:
         await send_city_dashboard(callback.message.chat.id, user_id)
 
@@ -6090,30 +6110,19 @@ async def commands_command(
 async def unknown_message(
     message: Message
 ):
-    if message.chat.type in {"group", "supergroup"}:
-        return
-    await message.answer(
-        "🏙️ برای مدیریت شهر از منوی زیر استفاده کن:\n\n"
-        "<code>/start</code>\n"
-        "<code>/menu</code>\n"
-        "<code>/city</code>\n"
-        "<code>/profile</code>\n"
-        "<code>/commands</code>\n\n"
-        "یا از دکمه‌های منو استفاده کن.",
-        reply_markup=main_keyboard(),
-    )
-
+    # مدیریت بازی داخل Mini App انجام می‌شود؛ پیام‌های متفرقه را بی‌پاسخ می‌گذاریم.
+    return
 
 
 # =========================================================
 # TELEGRAM MINI APP — شهر من
 # =========================================================
 
-def miniapp_keyboard():
+def miniapp_keyboard(user_id: int | None = None):
     if not WEBAPP_URL:
         return InlineKeyboardMarkup(inline_keyboard=[])
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🎮 ورود به شهر من", web_app=WebAppInfo(url=WEBAPP_URL + "/webapp"))]
+        [InlineKeyboardButton(text="🎮 ورود به شهر من", web_app=WebAppInfo(url=_miniapp_link(user_id)))]
     ])
 
 
@@ -6152,34 +6161,35 @@ def _validate_webapp_init_data(init_data: str):
 
 
 async def _miniapp_user(request):
-    # Telegram WebApp sends initData to the page. Prefer cryptographic validation.
+    # Primary: Telegram's signed initData.
     init_data = request.headers.get("X-Telegram-Init-Data", "") or request.query.get("initData", "")
     user_obj = _validate_webapp_init_data(init_data)
     if user_obj and user_obj.get("id"):
         user_id = int(user_obj["id"])
-        try:
-            await ensure_callback_player(user_id)
-        except Exception:
-            logging.exception("Mini App player initialization failed for %s", user_id)
-            raise web.HTTPInternalServerError(text="Mini App could not initialize the player")
+        await ensure_callback_player(user_id)
         return user_id
 
-    # Compatibility fallback for Telegram Android/WebView versions that do not
-    # preserve the custom init-data header. The frontend also sends the user id.
-    # The app is only exposed through the Telegram WebApp button.
-    fallback_id = request.headers.get("X-Telegram-User-Id", "") or request.query.get("user_id", "")
+    # Fallback: the bot-generated Mini App URL contains a signed user id and
+    # expiry. The frontend forwards these exact values to every API request.
     try:
-        user_id = int(fallback_id)
-    except (TypeError, ValueError):
-        user_id = 0
-    if user_id > 0:
-        try:
-            await ensure_callback_player(user_id)
-        except Exception:
-            logging.exception("Mini App fallback player initialization failed for %s", user_id)
-            raise web.HTTPInternalServerError(text="Mini App could not initialize the player")
-        return user_id
+        uid = int(request.query.get("uid", "0"))
+        exp = int(request.query.get("exp", "0"))
+        sig = request.query.get("sig", "")
+        now_ts = int(datetime.now(timezone.utc).timestamp())
+        if uid > 0 and exp >= now_ts and sig:
+            payload = f"{uid}:{exp}"
+            expected = hmac.new(BOT_TOKEN.encode(), payload.encode(), hashlib.sha256).hexdigest()
+            if hmac.compare_digest(expected, sig):
+                await ensure_callback_player(uid)
+                return uid
+    except Exception:
+        logging.exception("Mini App signed URL authentication failed")
 
+    logging.warning(
+        "Mini App auth failed: init_data=%s query_sig=%s path=%s user_agent=%s",
+        bool(init_data), bool(request.query.get("sig")), request.path,
+        (request.headers.get("User-Agent", "")[:120]),
+    )
     raise web.HTTPUnauthorized(text="Telegram WebApp authentication failed")
 
 
@@ -6448,8 +6458,16 @@ async def miniapp_action(request):
 
 async def miniapp_page(request):
     from pathlib import Path
-    path=Path(__file__).with_name("webapp")/"index.html"
-    return web.FileResponse(path)
+    path = Path(__file__).with_name("webapp") / "index.html"
+
+    # Never let Telegram/WebView cache an older Mini App page.
+    # The signed query parameters are also preserved by the frontend and
+    # forwarded to /api/state as a secure fallback when tg.initData is empty.
+    response = web.FileResponse(path)
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    return response
 
 
 # =========================================================

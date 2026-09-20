@@ -566,8 +566,10 @@ def citizen_bar(value):
 
 
 def start_reply_keyboard():
+    # فقط یک دکمه برای ورود مستقیم به Mini App؛ منوهای قدیمی داخل چت نمایش داده نمی‌شوند.
+    url = (WEBAPP_URL + "/webapp") if WEBAPP_URL else ""
     return ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text="🚀 شروع بازی")]],
+        keyboard=[[KeyboardButton(text="🎮 ورود به شهر من", web_app=WebAppInfo(url=url))]] if url else [[KeyboardButton(text="🎮 ورود به شهر من")]],
         resize_keyboard=True,
         is_persistent=True,
     )
@@ -2316,21 +2318,18 @@ async def ensure_callback_player(user_id):
 
 @dp.message(Command("start"))
 async def start_handler(message: Message):
-    user_id = await ensure_player(message)
-
-    await process_player_tick(user_id)
-    await collect_income(user_id)
-
-    await message.answer(
-        "🏙️ <b>به شهر من خوش اومدی!</b>\n\n"
-        "تو شهردار یک شهر کوچک هستی. شهر رو بساز، اقتصاد رو رشد بده و بحران‌ها رو مدیریت کن!",
-    )
-    await send_city_dashboard(message.chat.id, user_id)
-
-    await message.answer(
-        "برای ورود سریع به بازی از دکمه پایین استفاده کن. 🚀",
-        reply_markup=start_reply_keyboard(),
-    )
+    await ensure_player(message)
+    if WEBAPP_URL:
+        await message.answer(
+            "🏙️ <b>شهر من</b>\n\n"
+            "شهرت آماده است. همه امکانات بازی را از داخل مینی‌اپ مدیریت کن. 🎮",
+            reply_markup=start_reply_keyboard(),
+        )
+    else:
+        await message.answer(
+            "⚠️ آدرس Mini App تنظیم نشده است.\n"
+            "متغیر <code>WEBAPP_URL</code> را در Render تنظیم کن."
+        )
 
 
 @dp.message(F.text == "🚀 شروع بازی")
@@ -5710,15 +5709,10 @@ async def trigger_due_natural_disasters():
         try:
             if btype:
                 bname=BUILDINGS.get(btype,{}).get("name",btype)
-                kb=InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text=f"🔧 تعمیر فوری ({damage:,} 🪙)",callback_data=f"natural_repair:{event['id']}")],
-                    [InlineKeyboardButton(text="⏳ بعداً پرداخت می‌کنم",callback_data=f"natural_later:{event['id']}")],
-                ])
-                text=("🚨 <b>هشدار بلای طبیعی!</b>\n\n" f"{safe_text(row['disaster_name'])} بر سر شهرتون اومد!\n\n" f"🏢 ساختمان آسیب‌دیده: {safe_text(bname)}\n" f"💰 هزینه اولیه تعمیر: {damage:,} سکه\n\n" "⚠️ با هر ساعت تأخیر، ۱۰ سکه به هزینه تعمیر اضافه می‌شود.\n\nفوراً اقدام لازم را انجام دهید.")
+                text=("🚨 <b>هشدار بلای طبیعی!</b>\n\n" f"{safe_text(row['disaster_name'])} بر سر شهرتون اومد!\n\n" f"🏢 ساختمان آسیب‌دیده: {safe_text(bname)}\n" f"💰 هزینه اولیه تعمیر: {damage:,} سکه\n\n" "⚠️ با هر ساعت تأخیر، ۱۰ سکه به هزینه تعمیر اضافه می‌شود.\n\nفوراً وارد مینی‌اپ شوید و از بخش ساختمان‌ها تعمیر را انجام دهید.")
             else:
-                kb=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🏙️ مشاهده شهر",callback_data="city")],[InlineKeyboardButton(text="🔙 منو",callback_data="menu")]])
                 text=("🚨 <b>هشدار بلای طبیعی!</b>\n\n" f"{safe_text(row['disaster_name'])} بر سر شهرتون اومد!\n\n" "فعلاً ساختمانی برای آسیب‌دیدن وجود نداشت؛ حادثه در سوابق شهر ثبت شد.")
-            await bot.send_message(sch["user_id"],text,reply_markup=kb)
+            await bot.send_message(sch["user_id"],text)
         except Exception:
             logging.exception("Could not notify natural disaster for %s",sch["user_id"])
 
@@ -5738,13 +5732,13 @@ async def natural_repair_callback(callback: CallbackQuery):
             await conn.execute("UPDATE resources SET coins=coins-$1 WHERE user_id=$2",cost,uid)
             await conn.execute("UPDATE natural_disaster_events SET repaired=TRUE,repaired_at=NOW() WHERE id=$1",event_id)
     await callback.answer("تعمیر با موفقیت انجام شد. 🔧")
-    await callback.message.edit_text(f"✅ <b>ساختمان تعمیر شد.</b>\n\n💰 هزینه تعمیر: {cost:,} سکه",reply_markup=main_keyboard())
+    await callback.message.edit_text(f"✅ <b>ساختمان تعمیر شد.</b>\n\n💰 هزینه تعمیر: {cost:,} سکه\n\nادامه مدیریت شهر داخل Mini App انجام می‌شود.")
 
 
 @dp.callback_query(F.data.startswith("natural_later:"))
 async def natural_later_callback(callback: CallbackQuery):
     await callback.answer("خسارت باقی ماند؛ هر ساعت ۱۰ سکه به هزینه اضافه می‌شود.")
-    await callback.message.edit_text("⏳ <b>تعمیر به بعد موکول شد.</b>\n\n🏗️ خسارت در بخش ساختمان‌ها باقی می‌ماند.\n💰 هزینه تعمیر هر ساعت ۱۰ سکه افزایش پیدا می‌کند.",reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🏗️ ساختمان‌ها",callback_data="buildings")],[InlineKeyboardButton(text="🔙 منو",callback_data="menu")]]))
+    await callback.message.edit_text("⏳ <b>تعمیر به بعد موکول شد.</b>\n\n🏗️ خسارت در بخش ساختمان‌ها باقی می‌ماند.\n💰 هزینه تعمیر هر ساعت ۱۰ سکه افزایش پیدا می‌کند.\n\nبرای ادامه وارد Mini App شوید.")
 
 
 # =========================================================
@@ -6117,12 +6111,21 @@ async def unknown_message(
 
 def miniapp_keyboard():
     if not WEBAPP_URL:
-        return main_keyboard()
+        return InlineKeyboardMarkup(inline_keyboard=[])
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🎮 ورود به شهر من", web_app=WebAppInfo(url=WEBAPP_URL + "/webapp"))],
-        [InlineKeyboardButton(text="👑 شهردار", callback_data="mayor")],
-        [InlineKeyboardButton(text="🏪 بازار", callback_data="market")],
+        [InlineKeyboardButton(text="🎮 ورود به شهر من", web_app=WebAppInfo(url=WEBAPP_URL + "/webapp"))]
     ])
+
+
+def _json_safe(value):
+    """Convert asyncpg/Python values to JSON-safe values for Mini App responses."""
+    if isinstance(value, dict):
+        return {str(k): _json_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(v) for v in value]
+    if isinstance(value, datetime):
+        return value.isoformat()
+    return value
 
 
 def _validate_webapp_init_data(init_data: str):
@@ -6134,7 +6137,8 @@ def _validate_webapp_init_data(init_data: str):
         if not received_hash:
             return None
         data_check = "\n".join(f"{k}={pairs[k]}" for k in sorted(pairs))
-        secret = hmac.new(b"WebAppData", BOT_TOKEN.encode(), hashlib.sha256).digest()
+        # Telegram Web Apps: secret_key = HMAC_SHA256(key=bot_token, data="WebAppData")
+        secret = hmac.new(BOT_TOKEN.encode(), b"WebAppData", hashlib.sha256).digest()
         expected = hmac.new(secret, data_check.encode(), hashlib.sha256).hexdigest()
         if not hmac.compare_digest(expected, received_hash):
             return None
@@ -6153,7 +6157,11 @@ async def _miniapp_user(request):
     user_obj = _validate_webapp_init_data(init_data)
     if user_obj and user_obj.get("id"):
         user_id = int(user_obj["id"])
-        await ensure_callback_player(user_id)
+        try:
+            await ensure_callback_player(user_id)
+        except Exception:
+            logging.exception("Mini App player initialization failed for %s", user_id)
+            raise web.HTTPInternalServerError(text="Mini App could not initialize the player")
         return user_id
 
     # Compatibility fallback for Telegram Android/WebView versions that do not
@@ -6165,33 +6173,139 @@ async def _miniapp_user(request):
     except (TypeError, ValueError):
         user_id = 0
     if user_id > 0:
-        await ensure_callback_player(user_id)
+        try:
+            await ensure_callback_player(user_id)
+        except Exception:
+            logging.exception("Mini App fallback player initialization failed for %s", user_id)
+            raise web.HTTPInternalServerError(text="Mini App could not initialize the player")
         return user_id
 
     raise web.HTTPUnauthorized(text="Telegram WebApp authentication failed")
 
 
 async def miniapp_state(request):
+    # Keep the Mini App read-only endpoint resilient: a failed background tick or
+    # a legacy/missing optional table must not turn the whole Mini App into HTTP 500.
     user_id = await _miniapp_user(request)
-    await process_player_tick(user_id)
-    await recalculate_city(user_id)
-    city = await get_city(user_id)
-    player = await get_player(user_id)
-    resources = await get_resources(user_id)
-    async with db_pool.acquire() as conn:
-        buildings = await conn.fetch("SELECT building_type, level FROM buildings WHERE user_id=$1 ORDER BY building_type", user_id)
-        active = await conn.fetchrow("SELECT * FROM crises WHERE user_id=$1 AND status='active' ORDER BY created_at DESC LIMIT 1", user_id)
-        construction = await conn.fetchrow("SELECT building_type,target_level,ready_at FROM building_constructions WHERE user_id=$1 AND completed=FALSE LIMIT 1", user_id)
-        offers = await conn.fetch("SELECT id,seller_id,resource,amount,price FROM market_offers WHERE status='active' ORDER BY id DESC LIMIT 20")
-    return web.json_response({
-        "city": dict(city) if city else {},
-        "player": {"first_name": player["first_name"] if player else "شهردار", "level": player["level"] if player else 1, "xp": player["xp"] if player else 0},
-        "resources": dict(resources) if resources else {},
-        "buildings": [{"type": r["building_type"], "level": r["level"]} for r in buildings],
-        "crisis": dict(active) if active else None,
-        "construction": dict(construction) if construction else None,
-        "offers": [dict(r) for r in offers],
-    })
+    try:
+        # Ticking is intentionally not performed here. The normal game scheduler
+        # already handles income/crises, while the Mini App only reads the current state.
+        # This prevents a scheduler/database edge case from blanking the UI.
+        city = await get_city(user_id)
+        player = await get_player(user_id)
+        resources = await get_resources(user_id)
+
+        async with db_pool.acquire() as conn:
+            buildings = await conn.fetch(
+                "SELECT building_type, level FROM buildings WHERE user_id=$1 ORDER BY building_type",
+                user_id,
+            )
+            active = await conn.fetchrow(
+                "SELECT * FROM crises WHERE user_id=$1 AND status='active' ORDER BY created_at DESC LIMIT 1",
+                user_id,
+            )
+            construction = None
+            try:
+                construction = await conn.fetchrow(
+                    "SELECT building_type,target_level,ready_at FROM building_constructions WHERE user_id=$1 AND completed=FALSE LIMIT 1",
+                    user_id,
+                )
+            except Exception:
+                # Older databases may not have the optional construction table yet.
+                logging.exception("Mini App: building_constructions read failed")
+
+            offers = []
+            try:
+                offers = await conn.fetch(
+                    "SELECT mo.id,mo.seller_id,mo.resource_type,mo.amount,mo.price,p.first_name FROM market_offers mo JOIN players p ON p.user_id=mo.seller_id WHERE mo.status='active' ORDER BY mo.created_at DESC LIMIT 20"
+                )
+            except Exception:
+                logging.exception("Mini App: market_offers read failed")
+
+            friends = []
+            pending_requests = []
+            try:
+                friends = await conn.fetch(
+                    """SELECT p.user_id,p.first_name,c.city_name
+                       FROM friendships f JOIN players p ON p.user_id=f.friend_id
+                       JOIN cities c ON c.user_id=p.user_id
+                       WHERE f.user_id=$1 LIMIT 20""", user_id
+                )
+                pending_requests = await conn.fetch(
+                    """SELECT fr.id,p.user_id,p.first_name
+                       FROM friend_requests fr JOIN players p ON p.user_id=fr.sender_id
+                       WHERE fr.receiver_id=$1 AND fr.status='pending'
+                       ORDER BY fr.created_at DESC LIMIT 20""", user_id
+                )
+            except Exception:
+                logging.exception("Mini App: social read failed")
+
+            weekly = []
+            my_rank = None
+            my_score = 0
+            try:
+                key = week_key()
+                weekly = await conn.fetch(
+                    """SELECT ws.user_id,ws.score,p.first_name,c.city_name
+                       FROM weekly_scores ws JOIN players p ON p.user_id=ws.user_id
+                       JOIN cities c ON c.user_id=ws.user_id
+                       WHERE ws.week_key=$1 ORDER BY ws.score DESC,ws.user_id ASC LIMIT 10""", key
+                )
+                my_rank = await conn.fetchval(
+                    """SELECT rank FROM (SELECT user_id,ROW_NUMBER() OVER (ORDER BY score DESC,user_id ASC) rank FROM weekly_scores WHERE week_key=$1) r WHERE user_id=$2""", key,user_id
+                )
+                my_score = await conn.fetchval("SELECT score FROM weekly_scores WHERE week_key=$1 AND user_id=$2", key,user_id) or 0
+            except Exception:
+                logging.exception("Mini App: weekly ranking read failed")
+
+            news_rows = []
+            try:
+                news_rows = await conn.fetch("SELECT text,created_at FROM news WHERE user_id=$1 ORDER BY created_at DESC LIMIT 15", user_id)
+            except Exception:
+                logging.exception("Mini App: news read failed")
+
+            damages = []
+            try:
+                damages = await conn.fetch(
+                    """SELECT nde.id,nde.disaster_name,nde.building_type,nde.damage,nde.created_at
+                       FROM natural_disaster_events nde WHERE nde.user_id=$1 AND nde.repaired=FALSE
+                       ORDER BY nde.created_at DESC LIMIT 20""", user_id
+                )
+            except Exception:
+                logging.exception("Mini App: damage read failed")
+
+        payload = {
+            "city": dict(city) if city else {},
+            "player": {
+                "first_name": player["first_name"] if player else "شهردار",
+                "level": player["level"] if player else 1,
+                "xp": player["xp"] if player else 0,
+            },
+            "resources": dict(resources) if resources else {},
+            "buildings": [{"type": r["building_type"], "level": r["level"]} for r in buildings],
+            "crisis": dict(active) if active else None,
+            "construction": dict(construction) if construction else None,
+            "offers": [dict(r) for r in offers],
+            "social": {
+                "friends": [dict(r) for r in friends],
+                "pending": [dict(r) for r in pending_requests],
+            },
+            "ranking": {
+                "week": week_key(),
+                "top": [dict(r) for r in weekly],
+                "my_rank": my_rank,
+                "my_score": my_score,
+            },
+            "news": [dict(r) for r in news_rows],
+            "damages": [dict(r) for r in damages],
+        }
+        return web.json_response(_json_safe(payload))
+    except Exception as exc:
+        logging.exception("Mini App state failed for user %s", user_id)
+        return web.json_response(
+            {"ok": False, "message": "خطا در دریافت اطلاعات شهر. لطفاً دوباره تلاش کنید."},
+            status=200,
+        )
 
 
 async def miniapp_action(request):
@@ -6248,13 +6362,87 @@ async def miniapp_action(request):
         async with db_pool.acquire() as conn:
             async with conn.transaction():
                 city=await conn.fetchrow("SELECT * FROM cities WHERE user_id=$1 FOR UPDATE",user_id)
+                if not city:
+                    return web.json_response({"ok":False,"message":"شهر پیدا نشد."},status=404)
                 needed=10+city["villages"]*5; cost=2500+city["villages"]*1500
                 res=await conn.fetchrow("SELECT coins FROM resources WHERE user_id=$1 FOR UPDATE",user_id)
                 if city["city_level"]<needed: return web.json_response({"ok":False,"message":f"❌ سطح شهر باید حداقل {needed} باشد."},status=400)
                 if res["coins"]<cost: return web.json_response({"ok":False,"message":"❌ سکه کافی نیست."},status=400)
                 await conn.execute("UPDATE resources SET coins=coins-$1 WHERE user_id=$2",cost,user_id)
-                await conn.execute("UPDATE cities SET villages=villages+1,land=land+1,housing_capacity=housing_capacity+200,population=population+50 WHERE user_id=$1",user_id)
+                await conn.execute("UPDATE cities SET villages=villages+1,land=land+1,housing_capacity=housing_capacity+200,population=population+50,satisfaction=LEAST(100,satisfaction+2),economy=LEAST(100,economy+2) WHERE user_id=$1",user_id)
         return web.json_response({"ok":True,"message":"🏘️ روستا با موفقیت به شهر اضافه شد."})
+    if action in {"tax_up","tax_down"}:
+        delta = 2 if action == "tax_up" else -2
+        async with db_pool.acquire() as conn:
+            await conn.execute("UPDATE cities SET tax_rate=LEAST(25,GREATEST(0,tax_rate+$1)) WHERE user_id=$2",delta,user_id)
+        try:
+            await recalculate_city(user_id)
+        except Exception:
+            logging.exception("Mini App tax recalculation failed")
+        return web.json_response({"ok":True,"message":"💰 نرخ مالیات به‌روزرسانی شد."})
+    if action == "market_buy":
+        try: offer_id=int(payload.get("offer_id"))
+        except Exception: return web.json_response({"ok":False,"message":"پیشنهاد نامعتبر است."},status=400)
+        async with db_pool.acquire() as conn:
+            async with conn.transaction():
+                offer=await conn.fetchrow("SELECT * FROM market_offers WHERE id=$1 FOR UPDATE",offer_id)
+                if not offer or offer["status"]!="active": return web.json_response({"ok":False,"message":"این پیشنهاد دیگر فعال نیست."},status=400)
+                if offer["seller_id"]==user_id: return web.json_response({"ok":False,"message":"نمی‌توانی پیشنهاد خودت را بخری."},status=400)
+                buyer=await conn.fetchrow("SELECT * FROM resources WHERE user_id=$1 FOR UPDATE",user_id)
+                seller=await conn.fetchrow("SELECT * FROM resources WHERE user_id=$1 FOR UPDATE",offer["seller_id"])
+                if not buyer or not seller or buyer["coins"]<offer["price"]: return web.json_response({"ok":False,"message":"❌ سکه کافی نیست."},status=400)
+                resource=offer["resource_type"]
+                await conn.execute("UPDATE resources SET coins=coins-$1 WHERE user_id=$2",offer["price"],user_id)
+                await conn.execute("UPDATE resources SET coins=coins+$1 WHERE user_id=$2",offer["price"],offer["seller_id"])
+                await conn.execute(f"UPDATE resources SET {resource}={resource}+$1 WHERE user_id=$2",offer["amount"],user_id)
+                await conn.execute("UPDATE market_offers SET status='sold' WHERE id=$1",offer_id)
+        await add_xp(user_id,15)
+        return web.json_response({"ok":True,"message":"🛒 خرید با موفقیت انجام شد."})
+    if action == "market_sell":
+        resource=str(payload.get("resource", "")); amount=int(payload.get("amount",0) or 0); price=int(payload.get("price",0) or 0)
+        if resource not in MARKET_RESOURCES or amount<=0 or price<=0:
+            return web.json_response({"ok":False,"message":"منبع، مقدار یا قیمت نامعتبر است."},status=400)
+        async with db_pool.acquire() as conn:
+            async with conn.transaction():
+                bal=await conn.fetchval(f"SELECT {resource} FROM resources WHERE user_id=$1 FOR UPDATE",user_id)
+                if bal is None or bal<amount: return web.json_response({"ok":False,"message":"❌ موجودی کافی نیست."},status=400)
+                await conn.execute(f"UPDATE resources SET {resource}={resource}-$1 WHERE user_id=$2",amount,user_id)
+                await conn.execute("INSERT INTO market_offers(seller_id,resource_type,amount,price,status) VALUES($1,$2,$3,$4,'active')",user_id,resource,amount,price)
+        return web.json_response({"ok":True,"message":"📤 پیشنهاد فروش در بازار ثبت شد."})
+    if action == "friend_request":
+        try: receiver_id=int(payload.get("user_id"))
+        except Exception: return web.json_response({"ok":False,"message":"شناسه بازیکن نامعتبر است."},status=400)
+        if receiver_id==user_id: return web.json_response({"ok":False,"message":"نمی‌توانی خودت را اضافه کنی."},status=400)
+        async with db_pool.acquire() as conn:
+            target=await conn.fetchrow("SELECT user_id,first_name FROM players WHERE user_id=$1",receiver_id)
+            if not target: return web.json_response({"ok":False,"message":"بازیکن پیدا نشد."},status=404)
+            await conn.execute("INSERT INTO friend_requests(sender_id,receiver_id,status) VALUES($1,$2,'pending') ON CONFLICT(sender_id,receiver_id) DO UPDATE SET status='pending'",user_id,receiver_id)
+        try: await bot.send_message(receiver_id,"📨 یک درخواست دوستی جدید داری! از داخل Mini App بخش اجتماعی آن را بررسی کن.")
+        except Exception: pass
+        return web.json_response({"ok":True,"message":"📨 درخواست دوستی ارسال شد."})
+    if action == "friend_accept":
+        try: request_id=int(payload.get("request_id"))
+        except Exception: return web.json_response({"ok":False,"message":"درخواست نامعتبر است."},status=400)
+        async with db_pool.acquire() as conn:
+            async with conn.transaction():
+                req=await conn.fetchrow("SELECT * FROM friend_requests WHERE id=$1 AND receiver_id=$2 FOR UPDATE",request_id,user_id)
+                if not req or req["status"]!="pending": return web.json_response({"ok":False,"message":"درخواست پیدا نشد."},status=400)
+                await conn.execute("UPDATE friend_requests SET status='accepted' WHERE id=$1",request_id)
+                await conn.execute("INSERT INTO friendships(user_id,friend_id) VALUES($1,$2),($2,$1) ON CONFLICT DO NOTHING",req["sender_id"],user_id)
+        return web.json_response({"ok":True,"message":"🎉 دوستی با موفقیت ایجاد شد."})
+    if action == "damage_repair":
+        try: event_id=int(payload.get("event_id"))
+        except Exception: return web.json_response({"ok":False,"message":"خسارت نامعتبر است."},status=400)
+        async with db_pool.acquire() as conn:
+            async with conn.transaction():
+                row=await conn.fetchrow("SELECT * FROM natural_disaster_events WHERE id=$1 AND user_id=$2 AND repaired=FALSE FOR UPDATE",event_id,user_id)
+                if not row: return web.json_response({"ok":False,"message":"خسارت پیدا نشد."},status=400)
+                cost=row["damage"]+max(0,int((now_utc()-row["created_at"]).total_seconds()//3600))*10
+                bal=await conn.fetchval("SELECT coins FROM resources WHERE user_id=$1 FOR UPDATE",user_id)
+                if bal<cost: return web.json_response({"ok":False,"message":f"❌ سکه کافی نیست؛ هزینه فعلی {cost:,} سکه است."},status=400)
+                await conn.execute("UPDATE resources SET coins=coins-$1 WHERE user_id=$2",cost,user_id)
+                await conn.execute("UPDATE natural_disaster_events SET repaired=TRUE,repaired_at=NOW() WHERE id=$1",event_id)
+        return web.json_response({"ok":True,"message":"🔧 ساختمان تعمیر شد."})
     return web.json_response({"ok":False,"message":"عملیات ناشناخته است."},status=400)
 
 

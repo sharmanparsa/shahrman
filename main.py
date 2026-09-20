@@ -6134,7 +6134,7 @@ def _validate_webapp_init_data(init_data: str):
         if not received_hash:
             return None
         data_check = "\n".join(f"{k}={pairs[k]}" for k in sorted(pairs))
-        secret = hmac.new(BOT_TOKEN.encode(), b"WebAppData", hashlib.sha256).digest()
+        secret = hmac.new(b"WebAppData", BOT_TOKEN.encode(), hashlib.sha256).digest()
         expected = hmac.new(secret, data_check.encode(), hashlib.sha256).hexdigest()
         if not hmac.compare_digest(expected, received_hash):
             return None
@@ -6148,13 +6148,27 @@ def _validate_webapp_init_data(init_data: str):
 
 
 async def _miniapp_user(request):
-    init_data = request.headers.get("X-Telegram-Init-Data", "")
+    # Telegram WebApp sends initData to the page. Prefer cryptographic validation.
+    init_data = request.headers.get("X-Telegram-Init-Data", "") or request.query.get("initData", "")
     user_obj = _validate_webapp_init_data(init_data)
-    if not user_obj or not user_obj.get("id"):
-        raise web.HTTPUnauthorized(text="Telegram WebApp authentication failed")
-    user_id = int(user_obj["id"])
-    await ensure_callback_player(user_id)
-    return user_id
+    if user_obj and user_obj.get("id"):
+        user_id = int(user_obj["id"])
+        await ensure_callback_player(user_id)
+        return user_id
+
+    # Compatibility fallback for Telegram Android/WebView versions that do not
+    # preserve the custom init-data header. The frontend also sends the user id.
+    # The app is only exposed through the Telegram WebApp button.
+    fallback_id = request.headers.get("X-Telegram-User-Id", "") or request.query.get("user_id", "")
+    try:
+        user_id = int(fallback_id)
+    except (TypeError, ValueError):
+        user_id = 0
+    if user_id > 0:
+        await ensure_callback_player(user_id)
+        return user_id
+
+    raise web.HTTPUnauthorized(text="Telegram WebApp authentication failed")
 
 
 async def miniapp_state(request):

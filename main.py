@@ -6284,6 +6284,17 @@ async def miniapp_state(request):
             except Exception:
                 logging.exception("Mini App: damage read failed")
 
+            live_events = []
+            try:
+                live_events = await conn.fetch(
+                    """SELECT id,disaster_name,building_type,damage,created_at,repaired
+                       FROM natural_disaster_events
+                       WHERE user_id=$1 AND created_at >= NOW() - INTERVAL '6 hours'
+                       ORDER BY created_at DESC LIMIT 8""", user_id
+                )
+            except Exception:
+                logging.exception("Mini App: live disaster read failed")
+
         payload = {
             "city": dict(city) if city else {},
             "player": {
@@ -6308,6 +6319,7 @@ async def miniapp_state(request):
             },
             "news": [dict(r) for r in news_rows],
             "damages": [dict(r) for r in damages],
+            "live_events": [dict(r) for r in live_events],
         }
         return web.json_response(_json_safe(payload))
     except Exception as exc:

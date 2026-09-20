@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>شهر من</title>
+<meta name="version" content="20260920-authfix-2">
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
 :root{--bg:#06141b;--panel:#102a34;--panel2:#163b47;--line:#285866;--gold:#f4c45d;--text:#f4f7f8;--muted:#9fb8c0;--red:#9f3d45;--green:#28704e}
@@ -18,7 +19,17 @@ let S=null;
 const names={police:'🚓 پلیس',fire:'🚒 آتش‌نشانی',hospital:'🏥 بیمارستان',power:'⚡ نیروگاه',water:'💧 تصفیه‌خانه',school:'🏫 مدرسه',university:'🎓 دانشگاه',park:'🌳 پارک',shopping:'🏪 مرکز تجاری',stadium:'🏟️ ورزشگاه',recycling:'♻️ بازیافت',emergency:'🚑 مرکز امداد',roads:'🛣️ راه‌ها',waste:'🗑️ مدیریت پسماند',industry:'🏭 صنعت'};
 const resNames={coins:'💰 سکه',materials:'🧱 مصالح',food:'🍞 غذا',energy:'⚡ انرژی',water:'💧 آب',equipment:'🧰 تجهیزات'};
 const crisisNames={theft:'دزدی',fire:'آتش‌سوزی',disease:'بیماری',power:'قطعی برق',water:'کمبود آب',pollution:'آلودگی',storm:'طوفان',snow:'برف شدید',heat:'گرمای شدید',garbage:'انباشت زباله',accident:'حادثه',economic:'بحران اقتصادی',flood:'سیل',cold:'سرما',infrastructure:'زیرساخت'};
-async function api(path,opt={}){opt.headers={...(opt.headers||{}),'X-Telegram-Init-Data':tg?.initData||'','X-Telegram-User-Id':String(tg?.initDataUnsafe?.user?.id||'')};let r=await fetch(path,opt);let raw=await r.text();let d;try{d=JSON.parse(raw)}catch(e){throw Error(raw||('خطای سرور '+r.status))}if(!r.ok)throw Error(d.message||d.text||'خطای سرور');return d}
+async function api(path,opt={}){
+  opt.headers={...(opt.headers||{}),'X-Telegram-Init-Data':tg?.initData||'','X-Telegram-User-Id':String(tg?.initDataUnsafe?.user?.id||'')};
+  const pageParams=new URLSearchParams(window.location.search);
+  const authKeys=['uid','exp','sig'];
+  const hasAuth=authKeys.every(k=>pageParams.has(k));
+  if(hasAuth){
+    const sep=path.includes('?')?'&':'?';
+    path+=sep+'uid='+encodeURIComponent(pageParams.get('uid'))+'&exp='+encodeURIComponent(pageParams.get('exp'))+'&sig='+encodeURIComponent(pageParams.get('sig'));
+  }
+  let r=await fetch(path,opt);let raw=await r.text();let d;try{d=JSON.parse(raw)}catch(e){throw Error(raw||('خطای سرور '+r.status))}if(!r.ok)throw Error(d.message||d.text||'خطای سرور');return d
+}
 async function load(){try{S=await api('/webapp/api/state');if(S?.ok===false)throw Error(S.message||'خطا');document.getElementById('mayor').textContent='👑 '+(S.player?.first_name||'شهردار');show('home')}catch(e){document.getElementById('app').innerHTML='<div class="loader">❌ '+esc(e.message||'خطای نامشخص')+'<br><small>Mini App نتوانست اطلاعات شهر را دریافت کند.</small></div>'}}
 function scene(){let c=S.city;return `<div class="scene"><div class="sun"></div><div class="mount"></div><div class="road"></div><div class="citytitle">🏙️ ${esc(c.city_name||'شهر من')}<br><small>👑 ${esc(S.player.first_name||'شهردار')} · ⭐ سطح ${S.player.level}</small></div><div class="building b1"><i></i><i></i></div><div class="building b2"><i></i></div><div class="building b3"><i></i><i></i><i></i></div><div class="building b4"><i></i><i></i></div><div class="building b5"><i></i></div><div class="statbar"><div class="stat">👥<b>${num(c.population)}</b>جمعیت</div><div class="stat">😊<b>${c.satisfaction}%</b>رضایت</div><div class="stat">📈<b>${c.economy}%</b>اقتصاد</div></div></div>`}
 function home(){let c=S.city;return scene()+`<div class="section"><h2>📊 وضعیت شهر</h2><div class="grid"><div class="card">🛡️ امنیت<strong>${c.security}%</strong></div><div class="card">❤️ سلامت<strong>${c.health}%</strong></div><div class="card">⚡ برق<strong>${c.power}%</strong></div><div class="card">💧 آب<strong>${c.water}%</strong></div><div class="card">🎓 آموزش<strong>${c.education}%</strong></div><div class="card">🌳 تفریح<strong>${c.recreation}%</strong></div></div></div><div class="section"><h2>📦 منابع</h2><div class="grid">${resourceCards(S.resources)}</div></div><div class="section"><div class="buttons"><button class="btn primary" onclick="show('buildings')">🏗️ ساخت‌وساز</button><button class="btn ${S.crisis?'danger':'green'}" onclick="show('crisis')">${S.crisis?'🚨 بحران فعال':'✅ بحران‌ها'}</button><button class="btn" onclick="show('economy')">💰 اقتصاد</button><button class="btn" onclick="show('market')">🏪 بازار</button></div></div>`}

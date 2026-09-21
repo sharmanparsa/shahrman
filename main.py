@@ -6270,7 +6270,7 @@ async def miniapp_state(request):
 
             news_rows = []
             try:
-                news_rows = await conn.fetch("SELECT text,created_at FROM news WHERE user_id=$1 ORDER BY created_at DESC LIMIT 15", user_id)
+                news_rows = await conn.fetch("SELECT id,text,created_at FROM news WHERE user_id=$1 ORDER BY created_at DESC LIMIT 15", user_id)
             except Exception:
                 logging.exception("Mini App: news read failed")
 
@@ -6289,7 +6289,7 @@ async def miniapp_state(request):
                 live_events = await conn.fetch(
                     """SELECT id,disaster_name,building_type,damage,created_at,repaired
                        FROM natural_disaster_events
-                       WHERE user_id=$1 AND created_at >= NOW() - INTERVAL '6 hours'
+                       WHERE user_id=$1 AND created_at >= NOW() - INTERVAL '24 hours'
                        ORDER BY created_at DESC LIMIT 8""", user_id
                 )
             except Exception:
@@ -6507,6 +6507,8 @@ async def start_web_server():
 
     app.router.add_get("/webapp", miniapp_page)
     app.router.add_get("/webapp/", miniapp_page)
+    app.router.add_static("/webapp/assets", path=str(Path(__file__).with_name("webapp") / "assets"), name="webapp-assets")
+    app.router.add_static("/assets", path=str(Path(__file__).with_name("assets")), name="root-assets")
     app.router.add_get("/webapp/api/state", miniapp_state)
     app.router.add_post("/webapp/api/action", miniapp_action)
 

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>شهر من</title>
-<meta name="version" content="20260922-home-final-v9">
+<meta name="version" content="20260922-home-final-v10">
 <script src="https://telegram.org/js/telegram-web-app.js"></script><script>
 // GitHub Pages-safe asset paths: all images resolve relative to this index.html.
 const ASSET_DATA = {
@@ -180,9 +180,11 @@ body{background:#06131b}
 /* HOME MAP STAGE: preserve the original 2:3 map ratio; crop only horizontally on tall phones, never stretch/tilt it. */
 .map-stage{position:relative;width:100%;aspect-ratio:2/3;overflow:hidden}
 .map-stage>.map-bg,.map-stage>.ground{position:absolute!important;inset:0!important;width:100%!important;height:100%!important}
-.home-mode .map-stage{position:absolute!important;top:0!important;bottom:0!important;left:50%!important;width:auto!important;height:100%!important;aspect-ratio:2/3!important;transform:translateX(-50%)!important;overflow:hidden!important}
-.home-mode .map-stage>.map-bg,.home-mode .map-stage>.ground{width:100%!important;height:100%!important}
-.home-mode .town:before{content:"";position:absolute;left:0;right:0;top:0;height:11.5%;z-index:52;background:linear-gradient(180deg,#06131bf8 0%,#06131be8 72%,#06131b00 100%);pointer-events:none}
+.home-mode .map-stage{position:absolute!important;top:0!important;left:0!important;width:100%!important;height:100%!important;aspect-ratio:auto!important;transform:none!important;overflow:hidden!important;background:#06131b!important}
+.home-mode .map-stage>.map-bg,.home-mode .map-stage>.ground{position:absolute!important;left:0!important;top:0!important;width:100%!important;height:auto!important;aspect-ratio:2/3!important;object-position:top center!important}
+.home-mode .map-stage>.map-bg{object-fit:contain!important}
+.home-mode .map-stage>.ground{overflow:visible!important}
+.home-mode .town:before{content:"";position:absolute;left:0;right:0;top:0;height:12.4%;z-index:58;background:#06131bf8;pointer-events:none}
 .home-mode .home-hud,.home-mode .home-side,.home-mode .home-weather{z-index:60}
 .home-mode .home-weather .side-card{pointer-events:none}
 /* Locked lots: darken the whole baked-in first-layer building footprint, not only the lock. */
@@ -192,9 +194,11 @@ body{background:#06131b}
 .home-map-layer.locked .map-lock{z-index:6!important}
 .hud-avatar{overflow:hidden;display:flex;align-items:center;justify-content:center;background:#102b37!important}
 .hud-avatar img{width:100%!important;height:100%!important;display:block!important;object-fit:cover!important;border-radius:50%!important}
+.hud-avatar .telegram-avatar{background:#102b37;object-position:center center}
+.hud-avatar .telegram-avatar.loading{opacity:.25}
 .global-nav .nav-item{position:relative;min-width:0;min-height:0;display:flex;align-items:stretch;justify-content:center;overflow:visible}
 .global-nav .nav-item img{position:relative;z-index:1;width:100%;height:100%;object-fit:contain;cursor:pointer;filter:drop-shadow(0 4px 4px #0009);transform:scale(1.045);transform-origin:center bottom}
-.global-nav .nav-item.active:after{content:"";position:absolute;z-index:3;left:50%;top:30%;width:clamp(34px,9vw,62px);height:clamp(34px,9vw,62px);transform:translate(-50%,-50%);border:3px solid #24ef78;border-radius:50%;box-shadow:0 0 10px #24ef7888,0 0 3px #24ef78;pointer-events:none}
+.global-nav .nav-item.active:after{content:"";position:absolute;z-index:3;left:50%;top:48%;width:54%;height:58%;transform:translate(-50%,-50%);border:3px solid #24ef78;border-radius:12px;box-shadow:0 0 10px #24ef7888,0 0 3px #24ef78,inset 0 0 5px #24ef7844;pointer-events:none}
 .global-nav .nav-item:active img{transform:scale(1.015)}
 .home-map-layer .map-damage{display:none!important}
 /* HOME MAP ALIGNMENT FIX */
@@ -213,7 +217,7 @@ body{background:#06131b}
 .home-mode .ground{position:absolute!important;inset:0!important;width:100%!important;height:100%!important;background:transparent!important;z-index:2!important;overflow:hidden!important}
 .home-map-layer{position:absolute!important;inset:0!important;width:100%!important;height:100%!important;z-index:35!important;pointer-events:none!important;line-height:0!important}
 .home-map-layer>img{position:absolute!important;inset:0!important;width:100%!important;height:100%!important;display:block!important;object-fit:fill!important;pointer-events:none!important;user-select:none!important;-webkit-user-drag:none!important}
-.home-map-layer.locked>img{filter:brightness(.14) saturate(.18) drop-shadow(0 7px 6px #000c)!important}.home-map-layer.locked .map-shadow{position:absolute!important;left:var(--lot-x)!important;top:calc(var(--lot-y) + 2.2%)!important;transform:translate(-50%,-50%)!important;width:14%!important;height:4.8%!important;border-radius:50%!important;background:#000d!important;filter:blur(9px)!important;z-index:1!important;pointer-events:none!important}
+.home-map-layer.locked>img{filter:brightness(.14) saturate(.18) drop-shadow(0 7px 6px #000c)!important}.home-map-layer.locked .map-shadow{position:absolute!important;left:var(--lot-x)!important;top:calc(var(--lot-y) + 2.2%)!important;transform:translate(-50%,-50%)!important;width:20%!important;height:7%!important;border-radius:50%!important;background:#000f!important;filter:blur(10px)!important;z-index:1!important;pointer-events:none!important}
 .home-map-layer.unlocked>img{filter:drop-shadow(0 6px 4px #0008)!important}
 .home-map-layer.level-2>img{filter:drop-shadow(0 7px 5px #0009) brightness(1.01)!important}
 .home-map-layer.level-3>img{filter:drop-shadow(0 8px 5px #0009) brightness(1.02)!important}
@@ -293,14 +297,14 @@ function scene(withUI=true){
    const lv=levels[k]||0; const [file,x,y]=a; const [lw,lh]=lotSize[k]||[16,10];
    return `<div class="home-map-layer ${lv?'unlocked':'locked'} level-${Math.min(lv||1,5)}" style="--lot-x:${x}%;--lot-y:${y}%;--lot-w:${lw}%;--lot-h:${lh}%;">
      ${!lv?`<span class="lot-dark"></span>`:''}
-     <img src="${ASSET(file+'.png')}" alt="${esc(names[k]||k)}" loading="eager">
+     <img src="${ASSET((lv?file:file+'_locked')+'.png')}" alt="${esc(names[k]||k)}" loading="eager">
      ${!lv?`<span class="map-shadow"></span><span class="map-lock" style="left:${x}%;top:${y}%">🔒</span>`:''}
    </div>`;
  }).join('');
  let weather='';
  if(ev){let dn=String(ev.disaster_name||'');if(/⚡|صاعقه|رعد/.test(dn))weather='<div class="weather show"><div class="stormflash"></div><div class="lightning">⚡</div></div>';else if(/🔥|آتش/.test(dn))weather='<div class="weather show"><div class="fireglow" style="right:25%;top:42%"></div><div class="smokecloud" style="right:27%;top:31%"></div></div>';else if(/🌧️|باران|سیل|🌊|برف|❄/.test(dn))weather='<div class="weather show"></div>';}
  return `<div class="town"><div class="map-stage"><img class="map-bg" src="${ASSET_DATA['city_map.png'] || MAP_SRC}" onerror="this.onerror=null;this.src=MAP_SRC" alt="نقشه اصلی شهر" draggable="false"><div class="ground">${buildings}</div>${weather}</div><div class="home-hud">
-   <div class="hud-card mayor-card"><div class="hud-avatar"><img class="telegram-avatar" src="${esc(tg?.initDataUnsafe?.user?.photo_url||ASSET('mayor_avatar.png'))}" alt="پروفایل" referrerpolicy="no-referrer"></div><div class="hud-main"><div class="line1">👑 ${esc(S.player?.first_name||'شهردار')}</div><div class="line2">سطح ${num(S.player?.level||c.city_level||1)}</div><div class="hud-xp"><i style="width:${Math.max(0,Math.min(100,Number(S.player?.xp||0)%100))}%"></i></div><div class="hud-xptext">${num(S.player?.xp||0)} XP</div></div></div>
+   <div class="hud-card mayor-card"><div class="hud-avatar"><img class="telegram-avatar loading" src="${ASSET('mayor_avatar.png')}" alt="پروفایل" referrerpolicy="no-referrer" data-telegram-avatar></div><div class="hud-main"><div class="line1">👑 ${esc(S.player?.first_name||'شهردار')}</div><div class="line2">سطح ${num(S.player?.level||c.city_level||1)}</div><div class="hud-xp"><i style="width:${Math.max(0,Math.min(100,Number(S.player?.xp||0)%100))}%"></i></div><div class="hud-xptext">${num(S.player?.xp||0)} XP</div></div></div>
    <div class="hud-card hud-city-card"><div class="hud-city-title">🏙️ ${esc(c.city_name||'شهر من')}</div><div class="hud-city-pop">👥 جمعیت: ${num(c.population)}</div></div>
    <div class="hud-card hud-res-card"><div class="hud-res">🪙 ${num(S.resources?.coins)}</div><div class="hud-res">🍎 ${num(S.resources?.food)}</div><div class="hud-res">🧱 ${num(S.resources?.materials)}</div><div class="hud-res">⚡ ${num(S.resources?.energy)}</div><div class="hud-res">💧 ${num(S.resources?.water)}</div><div class="hud-res">🧰 ${num(S.resources?.equipment)}</div></div>
    <div class="hud-settings"><img onclick="show('more')" src="${ASSET('settings.png')}" alt="تنظیمات"></div>
@@ -351,9 +355,21 @@ function showHomeNotifications(force=false){
   homeSessionStarted=true;
 }
 function updateHomeNotifications(){showHomeNotifications(false)}
-async function refreshState(silent=false){try{let oldEvent=S?.live_events?.[0]?.id;let oldNews=S?.news?.[0]?.id||S?.news?.[0]?.created_at;let page=currentPage;let d=await api('/webapp/api/state');if(d?.ok===false)throw Error(d.message||'خطا');S=d;document.getElementById('mayor').textContent='👑 '+(S.player?.first_name||'شهردار');show(page);let newEvent=S.live_events?.[0];let newNews=S.news?.[0];if(!silent&&newEvent&&newEvent.id!==oldEvent)toast('🚨 '+(newEvent.disaster_name||'حادثه جدید')+' در شهرت رخ داد!');if(!silent&&newNews&&(newNews.id||newNews.created_at)!==(oldNews))toast('📰 '+(newNews.text||'خبر جدید شهر'));if(page==='home')showHomeNotifications(false)}catch(e){if(!silent)toast('❌ '+(e.message||'خطا در بروزرسانی'))}}
-async function load(){try{S=await api('/webapp/api/state');if(S?.ok===false)throw Error(S.message||'خطا');document.getElementById('mayor').textContent='👑 '+(S.player?.first_name||'شهردار');show('home');homeSessionStarted=false;showHomeNotifications(true)}catch(e){document.getElementById('app').innerHTML='<div class="loader">❌ '+esc(e.message||'خطای نامشخص')+'<br><small>Mini App نتوانست اطلاعات شهر را دریافت کند.</small></div>'}}
-async function act(payload){try{let page=currentPage;let d=await api('/webapp/api/action',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});toast(d.message||'انجام شد');let fresh=await api('/webapp/api/state');if(fresh?.ok===false)throw Error(fresh.message||'خطا');S=fresh;document.getElementById('mayor').textContent='👑 '+(S.player?.first_name||'شهردار');show(page)}catch(e){toast('❌ '+e.message)}}
+async function refreshState(silent=false){try{let oldEvent=S?.live_events?.[0]?.id;let oldNews=S?.news?.[0]?.id||S?.news?.[0]?.created_at;let page=currentPage;let d=await api('/webapp/api/state');if(d?.ok===false)throw Error(d.message||'خطا');S=d;document.getElementById('mayor').textContent='👑 '+(S.player?.first_name||'شهردار');show(page);let newEvent=S.live_events?.[0];let newNews=S.news?.[0];if(!silent&&newEvent&&newEvent.id!==oldEvent)toast('🚨 '+(newEvent.disaster_name||'حادثه جدید')+' در شهرت رخ داد!');if(!silent&&newNews&&(newNews.id||newNews.created_at)!==(oldNews))toast('📰 '+(newNews.text||'خبر جدید شهر'));if(page==='home'){showHomeNotifications(false);loadTelegramAvatar()} }catch(e){if(!silent)toast('❌ '+(e.message||'خطا در بروزرسانی'))}}
+async function loadTelegramAvatar(){
+  const imgs=document.querySelectorAll('[data-telegram-avatar]');
+  if(!imgs.length)return;
+  try{
+    const r=await api('/webapp/api/avatar');
+    if(!r?.ok||!r?.data_url)throw Error('avatar unavailable');
+    imgs.forEach(img=>{img.src=r.data_url;img.classList.remove('loading')});
+  }catch(e){
+    // Fallback remains the local avatar asset; never depend on Telegram CDN/CORS.
+    imgs.forEach(img=>img.classList.remove('loading'));
+  }
+}
+async function load(){try{S=await api('/webapp/api/state');if(S?.ok===false)throw Error(S.message||'خطا');document.getElementById('mayor').textContent='👑 '+(S.player?.first_name||'شهردار');show('home');homeSessionStarted=false;showHomeNotifications(true);loadTelegramAvatar()}catch(e){document.getElementById('app').innerHTML='<div class="loader">❌ '+esc(e.message||'خطای نامشخص')+'<br><small>Mini App نتوانست اطلاعات شهر را دریافت کند.</small></div>'}}
+async function act(payload){try{let page=currentPage;let d=await api('/webapp/api/action',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});toast(d.message||'انجام شد');let fresh=await api('/webapp/api/state');if(fresh?.ok===false)throw Error(fresh.message||'خطا');S=fresh;document.getElementById('mayor').textContent='👑 '+(S.player?.first_name||'شهردار');show(page);loadTelegramAvatar()}catch(e){toast('❌ '+e.message)}}
 function build(k){if(confirm('ساخت/ارتقای این ساختمان شروع شود؟'))act({action:'build',building:k});}
 function resolve(id){if(confirm('بحران مدیریت شود؟'))act({action:'resolve',crisis_id:id})}
 function expand(){if(confirm('روستای جدید اضافه شود؟'))act({action:'expand_village'})}

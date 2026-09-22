@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>شهر من</title>
-<meta name="version" content="20260922-map-layer2-registered-v7">
+<meta name="version" content="20260922-map-layer2-registered-v8">
 <script src="https://telegram.org/js/telegram-web-app.js"></script><script>
 // GitHub Pages-safe asset paths: all images resolve relative to this index.html.
 const ASSET_DATA = {
@@ -145,7 +145,7 @@ body{background:#06131b}
 .home-hud{position:absolute;left:1.2%;right:1.2%;top:1.0%;height:10.5%;z-index:60;display:grid;grid-template-columns:31% 24% 36% 6%;gap:1%;direction:ltr;pointer-events:none}
 .hud-card{position:relative;min-width:0;border:1px solid #3c8295;border-radius:18px;background:linear-gradient(180deg,#082a40f5,#052033eF);box-shadow:0 7px 18px #0009,inset 0 1px 0 #ffffff22;color:#fff;overflow:hidden;direction:rtl}
 .hud-card.mayor-card{display:flex;align-items:center;padding:5px 9px;gap:8px}
-.hud-avatar{width:58px;height:58px;border-radius:50%;object-fit:cover;object-position:left center;flex:none;border:2px solid #43d39a;background:#102b37}
+.hud-avatar{width:62px;height:62px;border-radius:50%;flex:none;border:2px solid #43d39a;background:#102b37 center/cover no-repeat;box-shadow:0 0 0 1px #0b1b25,inset 0 0 5px #0008}
 .hud-main{display:flex;flex-direction:column;justify-content:center;min-width:0;flex:1;text-align:right}
 .hud-main .line1{font-size:clamp(13px,2.6vw,26px);font-weight:900;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .hud-main .line2{font-size:clamp(9px,1.8vw,17px);color:#dce9ed;margin-top:2px}
@@ -157,7 +157,7 @@ body{background:#06131b}
 .hud-city-pop{font-size:clamp(9px,1.8vw,16px);color:#d6edf3;border-top:1px solid #3c7180;width:88%;text-align:center;padding-top:4px;margin-top:3px}
 .hud-res-card{padding:6px 10px;display:grid;grid-template-columns:repeat(3,1fr);grid-template-rows:1fr 1fr;gap:2px 10px;align-items:center}
 .hud-res{font-size:clamp(9px,1.9vw,17px);font-weight:800;white-space:nowrap;text-align:center}
-.hud-settings{display:flex;align-items:center;justify-content:center;pointer-events:auto;border:0;background:transparent;padding:0}
+.hud-settings{display:flex;align-items:center;justify-content:center;pointer-events:auto;border:1px solid #3c8295;border-radius:18px;background:linear-gradient(180deg,#082a40f7,#052033f5);box-shadow:0 7px 18px #0009,inset 0 1px 0 #ffffff22;padding:3px;overflow:hidden}
 .hud-settings img{width:100%;height:100%;object-fit:contain;filter:drop-shadow(0 3px 4px #0008);cursor:pointer}
 .home-side{position:absolute;left:1.5%;top:12.2%;z-index:60;width:22%;display:flex;flex-direction:column;gap:5px;pointer-events:none}
 .side-card{border-radius:14px;border:1px solid #3c8295;background:linear-gradient(180deg,#092d40f0,#062031eF);box-shadow:0 5px 14px #0008;padding:7px 9px;color:#fff;direction:rtl;display:flex;align-items:center;gap:8px}
@@ -166,9 +166,9 @@ body{background:#06131b}
 .home-weather .side-card{justify-content:center}
 
 /* Fixed five-button navigation. It does not change when the page changes. */
-.global-nav{position:fixed;left:0;right:0;bottom:0;height:11.8%;min-height:74px;z-index:120;display:grid;grid-template-columns:repeat(5,1fr);gap:1.4%;padding:0.8% 1.2% 1.2%;box-sizing:border-box;background:linear-gradient(180deg,#06131b00,#06131bf2 28%,#06131bff);pointer-events:auto}
-.global-nav img{width:100%;height:100%;object-fit:contain;cursor:pointer;filter:drop-shadow(0 4px 4px #0009)}
-.global-nav img:active{transform:scale(.98)}
+.global-nav{position:fixed;left:0;right:0;bottom:0;height:12.2%;min-height:78px;z-index:120;display:grid;grid-template-columns:repeat(5,1fr);gap:.45%;padding:0.45% .55% 1.0%;box-sizing:border-box;background:linear-gradient(180deg,#06131b00,#06131bf2 28%,#06131bff);pointer-events:auto}
+.global-nav img{width:100%;height:100%;object-fit:contain;cursor:pointer;filter:drop-shadow(0 4px 4px #0009);transform:scale(1.045);transform-origin:center bottom}
+.global-nav img:active{transform:scale(1.015)}
 .home-mode .global-nav{background:linear-gradient(180deg,#06131b00,#06131be8 35%,#06131bff)}
 
 /* Building lots: every lot exists; unopened lots are darkened and locked. */
@@ -193,7 +193,7 @@ body{background:#06131b}
 .home-mode .ground{position:absolute!important;inset:0!important;width:100%!important;height:100%!important;background:transparent!important;z-index:2!important;overflow:hidden!important}
 .home-map-layer{position:absolute!important;inset:0!important;width:100%!important;height:100%!important;z-index:35!important;pointer-events:none!important;line-height:0!important}
 .home-map-layer>img{position:absolute!important;inset:0!important;width:100%!important;height:100%!important;display:block!important;object-fit:fill!important;pointer-events:none!important;user-select:none!important;-webkit-user-drag:none!important}
-.home-map-layer.locked>img{filter:brightness(.14) saturate(.18) drop-shadow(0 7px 6px #000c)!important}
+.home-map-layer.locked>img{filter:brightness(.14) saturate(.18) drop-shadow(0 7px 6px #000c)!important}.home-map-layer.locked .map-shadow{position:absolute!important;left:var(--lot-x)!important;top:calc(var(--lot-y) + 2.2%)!important;transform:translate(-50%,-50%)!important;width:14%!important;height:4.8%!important;border-radius:50%!important;background:#000d!important;filter:blur(9px)!important;z-index:1!important;pointer-events:none!important}
 .home-map-layer.unlocked>img{filter:drop-shadow(0 6px 4px #0008)!important}
 .home-map-layer.level-2>img{filter:drop-shadow(0 7px 5px #0009) brightness(1.01)!important}
 .home-map-layer.level-3>img{filter:drop-shadow(0 8px 5px #0009) brightness(1.02)!important}
@@ -270,16 +270,16 @@ function scene(withUI=true){
  let ev=S.live_events?.[0];
  const buildings=Object.entries(assets).map(([k,a])=>{
    const lv=levels[k]||0; const [file,x,y]=a; const damaged=ev&&ev.building_type===k;
-   return `<div class="home-map-layer ${lv?'unlocked':'locked'} level-${Math.min(lv||1,5)}${damaged?' damaged':''}">
+   return `<div class="home-map-layer ${lv?'unlocked':'locked'} level-${Math.min(lv||1,5)}${damaged?' damaged':''}" style="--lot-x:${x}%;--lot-y:${y}%;">
      <img src="${ASSET(file+'.png')}" alt="${esc(names[k]||k)}" loading="eager">
-     ${!lv?`<span class="map-lock" style="left:${x}%;top:${y}%;">🔒</span>`:''}
+     ${!lv?`<span class="map-shadow"></span><span class="map-lock" style="left:${x}%;top:${y}%;">🔒</span>`:''}
      ${damaged?`<span class="map-damage" style="left:${x}%;top:${y}%;">⚠️</span>`:''}
    </div>`;
  }).join('');
  let weather='';
  if(ev){let dn=String(ev.disaster_name||'');if(/⚡|صاعقه|رعد/.test(dn))weather='<div class="weather show"><div class="stormflash"></div><div class="lightning">⚡</div></div>';else if(/🔥|آتش/.test(dn))weather='<div class="weather show"><div class="fireglow" style="right:25%;top:42%"></div><div class="smokecloud" style="right:27%;top:31%"></div></div>';else if(/🌧️|باران|سیل|🌊|برف|❄/.test(dn))weather='<div class="weather show"></div>';}
  return `<div class="town"><img class="map-bg" src="${ASSET_DATA['city_map.png'] || MAP_SRC}" onerror="this.onerror=null;this.src=MAP_SRC" alt="نقشه اصلی شهر" draggable="false"><div class="ground">${buildings}</div>${weather}<div class="home-hud">
-   <div class="hud-card mayor-card"><div class="hud-avatar" style="background-image:url('${ASSET('mayor.png')}');background-size:auto 100%;background-repeat:no-repeat;background-position:left center"></div><div class="hud-main"><div class="line1">👑 ${esc(S.player?.first_name||'شهردار')}</div><div class="line2">سطح ${num(S.player?.level||c.city_level||1)}</div><div class="hud-xp"><i style="width:${Math.max(0,Math.min(100,Number(S.player?.xp||0)%100))}%"></i></div><div class="hud-xptext">${num(S.player?.xp||0)} XP</div></div></div>
+   <div class="hud-card mayor-card"><div class="hud-avatar" style="background-image:url('${ASSET('mayor_avatar.png')}')"></div><div class="hud-main"><div class="line1">👑 ${esc(S.player?.first_name||'شهردار')}</div><div class="line2">سطح ${num(S.player?.level||c.city_level||1)}</div><div class="hud-xp"><i style="width:${Math.max(0,Math.min(100,Number(S.player?.xp||0)%100))}%"></i></div><div class="hud-xptext">${num(S.player?.xp||0)} XP</div></div></div>
    <div class="hud-card hud-city-card"><div class="hud-city-title">🏙️ ${esc(c.city_name||'شهر من')}</div><div class="hud-city-pop">👥 جمعیت: ${num(c.population)}</div></div>
    <div class="hud-card hud-res-card"><div class="hud-res">🪙 ${num(S.resources?.coins)}</div><div class="hud-res">🍎 ${num(S.resources?.food)}</div><div class="hud-res">🧱 ${num(S.resources?.materials)}</div><div class="hud-res">⚡ ${num(S.resources?.energy)}</div><div class="hud-res">💧 ${num(S.resources?.water)}</div><div class="hud-res">🧰 ${num(S.resources?.equipment)}</div></div>
    <div class="hud-settings"><img onclick="show('more')" src="${ASSET('settings.png')}" alt="تنظیمات"></div>

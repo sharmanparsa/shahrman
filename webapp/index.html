@@ -8,11 +8,11 @@
 // GitHub Pages-safe asset paths: all images resolve relative to this index.html.
 const ASSET_DATA = {};
 </script>
-<script src="buildings.js"></script>
-<script src="locked.js"></script>
+<script src="/webapp/buildings.js?v=20260922-20"></script>
+<script src="/webapp/locked.js?v=20260922-20"></script>
 <script>
 
-const ASSET = (path) => ASSET_DATA[String(path).replace(/^\/+/, '')] || ('/webapp/assets/' + String(path).replace(/^\/+/, ''));
+const ASSET = (path) => '/webapp/assets/' + String(path).replace(/^\/+/, '') + '?v=20260922-20';
 const MAP_SRC = ASSET('city_map_full.png');
 </script>
 <style>:root{--bg:#07141a;--panel:#102a34;--panel2:#173b45;--line:#315e69;--gold:#f4c45d;--text:#f5f8f9;--muted:#9db8c0;--green:#31d879;--red:#d94d52}

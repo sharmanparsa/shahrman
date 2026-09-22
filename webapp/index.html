@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>شهر من</title>
-<meta name="version" content="20260922-map-embedded-aligned-final">
+<meta name="version" content="20260922-map-layer2-registered-v7">
 <script src="https://telegram.org/js/telegram-web-app.js"></script><script>
 // GitHub Pages-safe asset paths: all images resolve relative to this index.html.
 const ASSET_DATA = {
@@ -188,6 +188,19 @@ body{background:#06131b}
 .home-mode .city-building .lock-badge{width:34%;height:34%;font-size:clamp(22px,5vw,46px);background:#071118e8;border:2px solid #a8b2b5}
 .home-mode .weather{display:none!important;z-index:1!important}
 .home-mode .weather .rain,.home-mode .weather .stormflash,.home-mode .weather .lightning{display:none!important}
+
+/* === HOME MAP LAYER 2: exact registered building overlays === */
+.home-mode .ground{position:absolute!important;inset:0!important;width:100%!important;height:100%!important;background:transparent!important;z-index:2!important;overflow:hidden!important}
+.home-map-layer{position:absolute!important;inset:0!important;width:100%!important;height:100%!important;z-index:35!important;pointer-events:none!important;line-height:0!important}
+.home-map-layer>img{position:absolute!important;inset:0!important;width:100%!important;height:100%!important;display:block!important;object-fit:fill!important;pointer-events:none!important;user-select:none!important;-webkit-user-drag:none!important}
+.home-map-layer.locked>img{filter:brightness(.14) saturate(.18) drop-shadow(0 7px 6px #000c)!important}
+.home-map-layer.unlocked>img{filter:drop-shadow(0 6px 4px #0008)!important}
+.home-map-layer.level-2>img{filter:drop-shadow(0 7px 5px #0009) brightness(1.01)!important}
+.home-map-layer.level-3>img{filter:drop-shadow(0 8px 5px #0009) brightness(1.02)!important}
+.home-map-layer.level-4>img{filter:drop-shadow(0 9px 6px #0009) brightness(1.03)!important}
+.home-map-layer.level-5>img{filter:drop-shadow(0 10px 6px #0009) brightness(1.04)!important}
+.home-map-layer .map-lock{position:absolute!important;transform:translate(-50%,-50%)!important;width:clamp(42px,8.5vw,88px)!important;height:clamp(42px,8.5vw,88px)!important;border-radius:50%!important;background:#071118e8!important;border:2px solid #a8b2b5!important;display:flex!important;align-items:center!important;justify-content:center!important;font-size:clamp(24px,5vw,48px)!important;line-height:1!important;box-shadow:0 4px 15px #000d!important;text-shadow:0 2px 4px #000!important;z-index:5!important}
+.home-map-layer .map-damage{position:absolute!important;transform:translate(-50%,-50%)!important;font-size:clamp(22px,5vw,46px)!important;z-index:6!important;filter:drop-shadow(0 2px 3px #000)!important}
 </style></head>
 <body>
 <div class="app"><div class="top"><div class="title">🏙️ شهر من</div><div class="pill" id="mayor">در حال ورود...</div></div><main id="app"><div class="loader">در حال بارگذاری شهر...</div></main></div>
@@ -238,32 +251,29 @@ function scene(withUI=true){
  // Building lots are anchored to the centers of the empty square plots in city_map.png.
  // Coordinates are percentages of the full map so the buildings stay on their lots on every phone size.
  const assets={
-  // [image, centerX%, centerY%, width%, rotation].
-  // Calibrated against the real footprints in city_map.png.
-  // PNGs already share the map's isometric/downward perspective.
-  university:['university',44.45,26.35,40.05,0],
-  police:['police',19.20,35.70,20.25,0],
-  stadium:['stadium',91.85,32.65,17.90,0],
-  school:['school',73.85,39.85,17.80,0],
-  hospital:['hospital',46.65,46.70,19.10,0],
-  fire:['fire',19.55,50.15,19.70,0],
-  power:['power',89.25,47.65,22.45,0],
-  park:['park',67.00,72.45,22.15,0],
-  industry:['industry',88.85,61.80,18.85,0],
-  roads:['roads',13.20,66.35,20.25,0],
-  port:['port',14.10,80.55,24.00,0],
-  housing:['house_b',60.10,56.20,17.00,0],
-  shopping:['house_a',64.70,55.10,17.00,0],
-  water:['water',82.80,49.35,14.80,0],
-  emergency:['emergency',89.35,67.15,14.80,0],
-  waste:['waste',73.35,54.80,16.20,0],
-  recycling:['waste',35.20,69.50,16.50,0]
+  // Full-map aligned layer-2 artwork. Each PNG was registered against the exact building footprint
+  // already baked into city_map.png, so the first-layer building is fully covered.
+  university:['layer2_university',44.0,26.0],
+  police:['layer2_police',19.6,38.7],
+  stadium:['layer2_stadium',90.0,33.8],
+  school:['layer2_school',73.8,40.6],
+  hospital:['layer2_hospital',47.8,47.0],
+  fire:['layer2_fire',22.2,51.5],
+  power:['layer2_power',87.8,48.0],
+  industry:['layer2_industry',89.0,62.3],
+  park:['layer2_park',67.0,71.9],
+  roads:['layer2_roads',15.6,59.0],
+  port:['layer2_port',20.3,77.5],
+  housing:['layer2_housing',54.9,57.1],
+  shopping:['layer2_shopping',66.0,56.2]
  };
  let ev=S.live_events?.[0];
  const buildings=Object.entries(assets).map(([k,a])=>{
-   const lv=levels[k]||0; const [file,x,y,w,rot]=a; const damaged=ev&&ev.building_type===k;
-   return `<div class="city-building ${lv?'unlocked':'locked'} level-${Math.min(lv||1,5)}${damaged?' damaged':''}" style="left:${x}%;top:${y}%;width:${w}%;transform:translate(-50%,-50%) rotate(${rot}deg);">
-     <img src="${ASSET(file+'.png')}" alt="${esc(names[k]||k)}" loading="eager">${!lv?'<span class="lock-badge">🔒</span>':''}${damaged?'<span class="damage-badge">⚠️</span>':''}
+   const lv=levels[k]||0; const [file,x,y]=a; const damaged=ev&&ev.building_type===k;
+   return `<div class="home-map-layer ${lv?'unlocked':'locked'} level-${Math.min(lv||1,5)}${damaged?' damaged':''}">
+     <img src="${ASSET(file+'.png')}" alt="${esc(names[k]||k)}" loading="eager">
+     ${!lv?`<span class="map-lock" style="left:${x}%;top:${y}%;">🔒</span>`:''}
+     ${damaged?`<span class="map-damage" style="left:${x}%;top:${y}%;">⚠️</span>`:''}
    </div>`;
  }).join('');
  let weather='';

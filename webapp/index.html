@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>شهر من</title>
-<meta name="version" content="20260922-map-layer2-registered-v8">
+<meta name="version" content="20260922-home-final-v9">
 <script src="https://telegram.org/js/telegram-web-app.js"></script><script>
 // GitHub Pages-safe asset paths: all images resolve relative to this index.html.
 const ASSET_DATA = {
@@ -177,6 +177,26 @@ body{background:#06131b}
 .city-building.locked img{opacity:.98}
 .city-building .lock-badge{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:38%;height:38%;border-radius:50%;background:#09151ddd;border:2px solid #c7d0d3;display:flex;align-items:center;justify-content:center;font-size:clamp(20px,5vw,44px);line-height:1;box-shadow:0 3px 12px #000b;text-shadow:0 2px 3px #000}
 
+/* HOME MAP STAGE: preserve the original 2:3 map ratio; crop only horizontally on tall phones, never stretch/tilt it. */
+.map-stage{position:relative;width:100%;aspect-ratio:2/3;overflow:hidden}
+.map-stage>.map-bg,.map-stage>.ground{position:absolute!important;inset:0!important;width:100%!important;height:100%!important}
+.home-mode .map-stage{position:absolute!important;top:0!important;bottom:0!important;left:50%!important;width:auto!important;height:100%!important;aspect-ratio:2/3!important;transform:translateX(-50%)!important;overflow:hidden!important}
+.home-mode .map-stage>.map-bg,.home-mode .map-stage>.ground{width:100%!important;height:100%!important}
+.home-mode .town:before{content:"";position:absolute;left:0;right:0;top:0;height:11.5%;z-index:52;background:linear-gradient(180deg,#06131bf8 0%,#06131be8 72%,#06131b00 100%);pointer-events:none}
+.home-mode .home-hud,.home-mode .home-side,.home-mode .home-weather{z-index:60}
+.home-mode .home-weather .side-card{pointer-events:none}
+/* Locked lots: darken the whole baked-in first-layer building footprint, not only the lock. */
+.home-map-layer.locked .lot-dark{position:absolute!important;left:var(--lot-x)!important;top:var(--lot-y)!important;transform:translate(-50%,-50%)!important;width:var(--lot-w,15%)!important;height:var(--lot-h,9%)!important;border-radius:46% 46% 38% 38% / 38% 38% 54% 54%!important;background:radial-gradient(ellipse at center,#000d 0%,#000b 58%,#0000 82%)!important;filter:blur(3px)!important;z-index:0!important;pointer-events:none!important}
+.home-map-layer.locked>img{position:relative!important;z-index:2!important}
+.home-map-layer.locked .map-shadow{z-index:3!important}
+.home-map-layer.locked .map-lock{z-index:6!important}
+.hud-avatar{overflow:hidden;display:flex;align-items:center;justify-content:center;background:#102b37!important}
+.hud-avatar img{width:100%!important;height:100%!important;display:block!important;object-fit:cover!important;border-radius:50%!important}
+.global-nav .nav-item{position:relative;min-width:0;min-height:0;display:flex;align-items:stretch;justify-content:center;overflow:visible}
+.global-nav .nav-item img{position:relative;z-index:1;width:100%;height:100%;object-fit:contain;cursor:pointer;filter:drop-shadow(0 4px 4px #0009);transform:scale(1.045);transform-origin:center bottom}
+.global-nav .nav-item.active:after{content:"";position:absolute;z-index:3;left:50%;top:30%;width:clamp(34px,9vw,62px);height:clamp(34px,9vw,62px);transform:translate(-50%,-50%);border:3px solid #24ef78;border-radius:50%;box-shadow:0 0 10px #24ef7888,0 0 3px #24ef78;pointer-events:none}
+.global-nav .nav-item:active img{transform:scale(1.015)}
+.home-map-layer .map-damage{display:none!important}
 /* HOME MAP ALIGNMENT FIX */
 .home-mode .town{background:transparent!important}
 .home-mode .ground{position:absolute!important;inset:0!important;width:100%!important;height:100%!important}
@@ -267,25 +287,26 @@ function scene(withUI=true){
   housing:['layer2_housing',54.9,57.1],
   shopping:['layer2_shopping',66.0,56.2]
  };
- let ev=S.live_events?.[0];
+ let ev=(S.damages||[])[0]||null;
+ const lotSize={university:[18,12],police:[15,9],stadium:[18,11],school:[15,9],hospital:[16,10],fire:[15,9],power:[17,10],industry:[17,10],park:[18,11],roads:[16,9],port:[18,10],housing:[17,10],shopping:[17,10]};
  const buildings=Object.entries(assets).map(([k,a])=>{
-   const lv=levels[k]||0; const [file,x,y]=a; const damaged=ev&&ev.building_type===k;
-   return `<div class="home-map-layer ${lv?'unlocked':'locked'} level-${Math.min(lv||1,5)}${damaged?' damaged':''}" style="--lot-x:${x}%;--lot-y:${y}%;">
+   const lv=levels[k]||0; const [file,x,y]=a; const [lw,lh]=lotSize[k]||[16,10];
+   return `<div class="home-map-layer ${lv?'unlocked':'locked'} level-${Math.min(lv||1,5)}" style="--lot-x:${x}%;--lot-y:${y}%;--lot-w:${lw}%;--lot-h:${lh}%;">
+     ${!lv?`<span class="lot-dark"></span>`:''}
      <img src="${ASSET(file+'.png')}" alt="${esc(names[k]||k)}" loading="eager">
-     ${!lv?`<span class="map-shadow"></span><span class="map-lock" style="left:${x}%;top:${y}%;">🔒</span>`:''}
-     ${damaged?`<span class="map-damage" style="left:${x}%;top:${y}%;">⚠️</span>`:''}
+     ${!lv?`<span class="map-shadow"></span><span class="map-lock" style="left:${x}%;top:${y}%">🔒</span>`:''}
    </div>`;
  }).join('');
  let weather='';
  if(ev){let dn=String(ev.disaster_name||'');if(/⚡|صاعقه|رعد/.test(dn))weather='<div class="weather show"><div class="stormflash"></div><div class="lightning">⚡</div></div>';else if(/🔥|آتش/.test(dn))weather='<div class="weather show"><div class="fireglow" style="right:25%;top:42%"></div><div class="smokecloud" style="right:27%;top:31%"></div></div>';else if(/🌧️|باران|سیل|🌊|برف|❄/.test(dn))weather='<div class="weather show"></div>';}
- return `<div class="town"><img class="map-bg" src="${ASSET_DATA['city_map.png'] || MAP_SRC}" onerror="this.onerror=null;this.src=MAP_SRC" alt="نقشه اصلی شهر" draggable="false"><div class="ground">${buildings}</div>${weather}<div class="home-hud">
-   <div class="hud-card mayor-card"><div class="hud-avatar" style="background-image:url('${ASSET('mayor_avatar.png')}')"></div><div class="hud-main"><div class="line1">👑 ${esc(S.player?.first_name||'شهردار')}</div><div class="line2">سطح ${num(S.player?.level||c.city_level||1)}</div><div class="hud-xp"><i style="width:${Math.max(0,Math.min(100,Number(S.player?.xp||0)%100))}%"></i></div><div class="hud-xptext">${num(S.player?.xp||0)} XP</div></div></div>
+ return `<div class="town"><div class="map-stage"><img class="map-bg" src="${ASSET_DATA['city_map.png'] || MAP_SRC}" onerror="this.onerror=null;this.src=MAP_SRC" alt="نقشه اصلی شهر" draggable="false"><div class="ground">${buildings}</div>${weather}</div><div class="home-hud">
+   <div class="hud-card mayor-card"><div class="hud-avatar"><img class="telegram-avatar" src="${esc(tg?.initDataUnsafe?.user?.photo_url||ASSET('mayor_avatar.png'))}" alt="پروفایل" referrerpolicy="no-referrer"></div><div class="hud-main"><div class="line1">👑 ${esc(S.player?.first_name||'شهردار')}</div><div class="line2">سطح ${num(S.player?.level||c.city_level||1)}</div><div class="hud-xp"><i style="width:${Math.max(0,Math.min(100,Number(S.player?.xp||0)%100))}%"></i></div><div class="hud-xptext">${num(S.player?.xp||0)} XP</div></div></div>
    <div class="hud-card hud-city-card"><div class="hud-city-title">🏙️ ${esc(c.city_name||'شهر من')}</div><div class="hud-city-pop">👥 جمعیت: ${num(c.population)}</div></div>
    <div class="hud-card hud-res-card"><div class="hud-res">🪙 ${num(S.resources?.coins)}</div><div class="hud-res">🍎 ${num(S.resources?.food)}</div><div class="hud-res">🧱 ${num(S.resources?.materials)}</div><div class="hud-res">⚡ ${num(S.resources?.energy)}</div><div class="hud-res">💧 ${num(S.resources?.water)}</div><div class="hud-res">🧰 ${num(S.resources?.equipment)}</div></div>
    <div class="hud-settings"><img onclick="show('more')" src="${ASSET('settings.png')}" alt="تنظیمات"></div>
  </div>
  <div class="home-side"><div class="side-card"><div class="ico">😊</div><div class="txt"><div class="name">رضایت مردم</div><div class="bar"><i style="width:${Math.max(0,Math.min(100,Number(c.satisfaction||0)))}%"></i></div><div class="val">${num(c.satisfaction)}%</div></div></div><div class="side-card"><div class="ico">🪙</div><div class="txt"><div class="name">مالیات</div><div class="val">${num(c.tax_rate)}%</div></div></div></div>
- <div class="home-weather"><div class="side-card"><div class="ico">🌧️</div><div class="txt"><div class="name">بارندگی شدید</div><div class="val">${ev?esc(ev.disaster_name||'فعال'):'آرام'}</div></div></div></div>
+ ${ev?`<div class="home-weather"><div class="side-card"><div class="ico">🌧️</div><div class="txt"><div class="name">${esc(ev.disaster_name||'بلای طبیعی')}</div><div class="val">فعال · تا زمان تعمیر/حل حادثه</div></div></div></div>`:''}
  <div id="homeNotify" class="home-notify-stack hidden"></div>
  </div>`;
 }
@@ -303,7 +324,7 @@ function news(){return `<div class="section"><h2>📰 روزنامه شهر</h2>
 function more(){return `<div class="section"><h2>🏙️ امکانات شهر</h2><div class="buttons"><button class="btn" onclick="show('resources')">📦 منابع</button><button class="btn" onclick="show('economy')">💰 اقتصاد</button><button class="btn" onclick="show('market')">🏪 بازار</button><button class="btn" onclick="show('social')">🤝 اجتماعی</button><button class="btn" onclick="show('ranking')">🏆 رقابت</button><button class="btn" onclick="show('news')">📰 روزنامه</button><button class="btn" onclick="show('map')">🗺️ توسعه</button><button class="btn" onclick="show('buildings')">🏗️ ساختمان‌ها</button><button class="btn" onclick="show('crisis')">🚨 بحران‌ها</button></div></div>`}
 function resources(){return `<div class="section"><h2>📦 منابع</h2><div class="grid">${resourceCards(S.resources)}</div><div class="muted" style="margin-top:10px">درآمد پایه هر منبع: ۲۰ واحد در ساعت. درآمد ساختمان‌های مرتبط با ساخت/ارتقا در محاسبات شهر اعمال می‌شود.</div></div>`}
 let currentPage='home';
-function renderGlobalNav(){const n=document.getElementById('globalNav');if(!n)return;n.innerHTML=[['nav_buildings.png','buildings'],['nav_crisis.png','crisis'],['nav_city.png','home'],['nav_map.png','map'],['nav_more.png','more']].map(([f,p])=>`<img onclick="show('${p}')" src="${ASSET(f)}" alt="">`).join('')}
+function renderGlobalNav(){const n=document.getElementById('globalNav');if(!n)return;n.innerHTML=[['nav_buildings.png','buildings'],['nav_crisis.png','crisis'],['nav_city.png','home'],['nav_map.png','map'],['nav_more.png','more']].map(([f,p])=>`<div class="nav-item ${currentPage===p?'active':''}" onclick="show('${p}')"><img src="${ASSET(f)}" alt=""></div>`).join('')}
 function show(p){currentPage=p;document.body.classList.toggle('home-mode',p==='home');let html={home,buildings,crisis,map,more,economy,market,social,ranking,news,resources}[p]?.();document.getElementById('app').innerHTML=html||more();renderGlobalNav();if(p==='home')setTimeout(updateHomeNotifications,0)}
 const NOTIFY_MS=60000;
 let notifyHideTimer=null;

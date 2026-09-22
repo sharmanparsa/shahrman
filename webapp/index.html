@@ -222,6 +222,51 @@ body{background:#06131b}
 .home-map-layer.locked>img{position:absolute!important;inset:0!important;width:100%!important;height:100%!important;object-fit:fill!important;display:block!important;filter:none!important;opacity:1!important}
 .home-map-layer.locked .map-lock{z-index:6!important}
 .home-map-layer.locked .lot-dark,.home-map-layer.locked .map-shadow{display:none!important}
+
+/* === FINAL MAP / LAYER-2 ALIGNMENT: preserve the original 1024x1820 canvas === */
+.home-mode .map-stage{
+  position:absolute!important; inset:0!important;
+  width:100%!important; height:100%!important;
+  aspect-ratio:auto!important; overflow:hidden!important;
+  background:#06131b!important;
+}
+.home-mode .map-canvas{
+  position:absolute!important;
+  top:0!important; left:50%!important;
+  height:100%!important;
+  width:auto!important;
+  aspect-ratio:1024/1820!important;
+  transform:translateX(-50%)!important;
+  overflow:hidden!important;
+}
+.home-mode .map-canvas>.map-bg,
+.home-mode .map-canvas>.ground{
+  position:absolute!important; inset:0!important;
+  width:100%!important; height:100%!important;
+}
+.home-mode .map-canvas>.map-bg{
+  object-fit:fill!important;
+  object-position:center!important;
+  transform:none!important;
+}
+.home-mode .map-canvas>.ground{
+  overflow:hidden!important;
+  background:transparent!important;
+  z-index:2!important;
+}
+.home-mode .home-map-layer{
+  position:absolute!important; inset:0!important;
+  width:100%!important; height:100%!important;
+  overflow:visible!important;
+}
+.home-mode .home-map-layer>img{
+  position:absolute!important; inset:0!important;
+  width:100%!important; height:100%!important;
+  object-fit:fill!important;
+  transform:none!important;
+}
+.home-mode .town:before{display:none!important;content:none!important}
+
 </style></head>
 <body>
 <div class="app"><div class="top"><div class="title">🏙️ شهر من</div><div class="pill" id="mayor">در حال ورود...</div></div><main id="app"><div class="loader">در حال بارگذاری شهر...</div></main></div>
@@ -294,7 +339,7 @@ function scene(withUI=true){
  }).join('');
  let weather='';
  if(ev){let dn=String(ev.disaster_name||'');if(/⚡|صاعقه|رعد/.test(dn))weather='<div class="weather show"><div class="stormflash"></div><div class="lightning">⚡</div></div>';else if(/🔥|آتش/.test(dn))weather='<div class="weather show"><div class="fireglow" style="right:25%;top:42%"></div><div class="smokecloud" style="right:27%;top:31%"></div></div>';else if(/🌧️|باران|سیل|🌊|برف|❄/.test(dn))weather='<div class="weather show"></div>';}
- return `<div class="town"><div class="map-stage"><img class="map-bg" src="${ASSET('city_map_full.png')}" alt="نقشه اصلی شهر" draggable="false"><div class="ground">${buildings}</div>${weather}</div><div class="home-hud">
+ return `<div class="town"><div class="map-stage"><div class="map-canvas"><img class="map-bg" src="${ASSET('city_map_full.png')}" alt="نقشه اصلی شهر" draggable="false"><div class="ground">${buildings}</div></div>${weather}</div><div class="home-hud">
    <div class="hud-card mayor-card"><div class="hud-avatar"><img class="telegram-avatar loading" src="${ASSET('mayor_avatar.png')}" alt="پروفایل" referrerpolicy="no-referrer" data-telegram-avatar></div><div class="hud-main"><div class="line1">👑 ${esc(S.player?.first_name||'شهردار')}</div><div class="line2">سطح ${num(S.player?.level||c.city_level||1)}</div><div class="hud-xp"><i style="width:${Math.max(0,Math.min(100,Number(S.player?.xp||0)%100))}%"></i></div><div class="hud-xptext">${num(S.player?.xp||0)} XP</div></div></div>
    <div class="hud-card hud-city-card"><div class="hud-city-title">🏙️ ${esc(c.city_name||'شهر من')}</div><div class="hud-city-pop">👥 جمعیت: ${num(c.population)}</div></div>
    <div class="hud-card hud-res-card"><div class="hud-res">🪙 ${num(S.resources?.coins)}</div><div class="hud-res">🍎 ${num(S.resources?.food)}</div><div class="hud-res">🧱 ${num(S.resources?.materials)}</div><div class="hud-res">⚡ ${num(S.resources?.energy)}</div><div class="hud-res">💧 ${num(S.resources?.water)}</div><div class="hud-res">🧰 ${num(S.resources?.equipment)}</div></div>

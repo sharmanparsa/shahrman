@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>شهر من</title>
-<meta name="version" content="20260922-home-final-v10">
+<meta name="version" content="20260922-home-final-v11">
 <script src="https://telegram.org/js/telegram-web-app.js"></script><script>
 // GitHub Pages-safe asset paths: all images resolve relative to this index.html.
 const ASSET_DATA = {
@@ -178,15 +178,7 @@ body{background:#06131b}
 .city-building .lock-badge{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:38%;height:38%;border-radius:50%;background:#09151ddd;border:2px solid #c7d0d3;display:flex;align-items:center;justify-content:center;font-size:clamp(20px,5vw,44px);line-height:1;box-shadow:0 3px 12px #000b;text-shadow:0 2px 3px #000}
 
 /* HOME MAP STAGE: preserve the original 2:3 map ratio; crop only horizontally on tall phones, never stretch/tilt it. */
-.map-stage{position:relative;width:100%;aspect-ratio:2/3;overflow:hidden}
-.map-stage>.map-bg,.map-stage>.ground{position:absolute!important;inset:0!important;width:100%!important;height:100%!important}
-.home-mode .map-stage{position:absolute!important;top:0!important;left:0!important;width:100%!important;height:100%!important;aspect-ratio:auto!important;transform:none!important;overflow:hidden!important;background:#06131b!important}
-.home-mode .map-stage>.map-bg,.home-mode .map-stage>.ground{position:absolute!important;left:0!important;top:0!important;width:100%!important;height:auto!important;aspect-ratio:2/3!important;object-position:top center!important}
-.home-mode .map-stage>.map-bg{object-fit:contain!important}
-.home-mode .map-stage>.ground{overflow:visible!important}
-.home-mode .town:before{content:"";position:absolute;left:0;right:0;top:0;height:12.4%;z-index:58;background:#06131bf8;pointer-events:none}
-.home-mode .home-hud,.home-mode .home-side,.home-mode .home-weather{z-index:60}
-.home-mode .home-weather .side-card{pointer-events:none}
+.map-stage{position:relative;width:100%;aspect-ratio:9/16;overflow:hidden}.map-stage>.map-bg,.map-stage>.ground{position:absolute!important;inset:0!important;width:100%!important;height:100%!important}.home-mode .map-stage{position:absolute!important;inset:0!important;width:100%!important;height:100%!important;aspect-ratio:auto!important;overflow:hidden!important;background:#06131b!important}.home-mode .map-stage>.map-bg,.home-mode .map-stage>.ground{position:absolute!important;inset:0!important;width:100%!important;height:100%!important;aspect-ratio:auto!important;object-position:center!important}.home-mode .map-stage>.map-bg{object-fit:fill!important}.home-mode .map-stage>.ground{overflow:visible!important}.home-mode .town:before{content:"";position:absolute;left:0;right:0;top:0;height:12.4%;z-index:58;background:#06131bf8;pointer-events:none}.home-mode .home-hud,.home-mode .home-side,.home-mode .home-weather{z-index:60}.home-mode .home-weather .side-card{pointer-events:none}
 /* Locked lots: darken the whole baked-in first-layer building footprint, not only the lock. */
 .home-map-layer.locked .lot-dark{position:absolute!important;left:var(--lot-x)!important;top:var(--lot-y)!important;transform:translate(-50%,-50%)!important;width:var(--lot-w,15%)!important;height:var(--lot-h,9%)!important;border-radius:46% 46% 38% 38% / 38% 38% 54% 54%!important;background:radial-gradient(ellipse at center,#000d 0%,#000b 58%,#0000 82%)!important;filter:blur(3px)!important;z-index:0!important;pointer-events:none!important}
 .home-map-layer.locked>img{position:relative!important;z-index:2!important}
@@ -198,7 +190,7 @@ body{background:#06131b}
 .hud-avatar .telegram-avatar.loading{opacity:.25}
 .global-nav .nav-item{position:relative;min-width:0;min-height:0;display:flex;align-items:stretch;justify-content:center;overflow:visible}
 .global-nav .nav-item img{position:relative;z-index:1;width:100%;height:100%;object-fit:contain;cursor:pointer;filter:drop-shadow(0 4px 4px #0009);transform:scale(1.045);transform-origin:center bottom}
-.global-nav .nav-item.active:after{content:"";position:absolute;z-index:3;left:50%;top:48%;width:54%;height:58%;transform:translate(-50%,-50%);border:3px solid #24ef78;border-radius:12px;box-shadow:0 0 10px #24ef7888,0 0 3px #24ef78,inset 0 0 5px #24ef7844;pointer-events:none}
+.global-nav .nav-item.active:after{content:'';position:absolute;z-index:3;left:50%;top:50%;width:clamp(52px,15vw,92px);height:clamp(52px,15vw,92px);transform:translate(-50%,-50%);border:3px solid #24ef78;border-radius:14px;box-shadow:0 0 10px #24ef7888,0 0 3px #24ef78,inset 0 0 5px #24ef7844;pointer-events:none;box-sizing:border-box}
 .global-nav .nav-item:active img{transform:scale(1.015)}
 .home-map-layer .map-damage{display:none!important}
 /* HOME MAP ALIGNMENT FIX */
@@ -217,7 +209,7 @@ body{background:#06131b}
 .home-mode .ground{position:absolute!important;inset:0!important;width:100%!important;height:100%!important;background:transparent!important;z-index:2!important;overflow:hidden!important}
 .home-map-layer{position:absolute!important;inset:0!important;width:100%!important;height:100%!important;z-index:35!important;pointer-events:none!important;line-height:0!important}
 .home-map-layer>img{position:absolute!important;inset:0!important;width:100%!important;height:100%!important;display:block!important;object-fit:fill!important;pointer-events:none!important;user-select:none!important;-webkit-user-drag:none!important}
-.home-map-layer.locked>img{filter:brightness(.14) saturate(.18) drop-shadow(0 7px 6px #000c)!important}.home-map-layer.locked .map-shadow{position:absolute!important;left:var(--lot-x)!important;top:calc(var(--lot-y) + 2.2%)!important;transform:translate(-50%,-50%)!important;width:20%!important;height:7%!important;border-radius:50%!important;background:#000f!important;filter:blur(10px)!important;z-index:1!important;pointer-events:none!important}
+.home-map-layer.locked>img{filter:none!important}.home-map-layer.locked .map-shadow{position:absolute!important;left:var(--lot-x)!important;top:calc(var(--lot-y) + 2.5%)!important;transform:translate(-50%,-50%)!important;width:calc(var(--lot-w)*.92)!important;height:calc(var(--lot-h)*.32)!important;border-radius:50%!important;background:#000f!important;filter:blur(9px)!important;z-index:1!important;pointer-events:none!important}
 .home-map-layer.unlocked>img{filter:drop-shadow(0 6px 4px #0008)!important}
 .home-map-layer.level-2>img{filter:drop-shadow(0 7px 5px #0009) brightness(1.01)!important}
 .home-map-layer.level-3>img{filter:drop-shadow(0 8px 5px #0009) brightness(1.02)!important}
@@ -275,35 +267,29 @@ function scene(withUI=true){
  // Building lots are anchored to the centers of the empty square plots in city_map.png.
  // Coordinates are percentages of the full map so the buildings stay on their lots on every phone size.
  const assets={
-  // Full-map aligned layer-2 artwork. Each PNG was registered against the exact building footprint
-  // already baked into city_map.png, so the first-layer building is fully covered.
-  university:['layer2_university',44.0,26.0],
-  police:['layer2_police',19.6,38.7],
-  stadium:['layer2_stadium',90.0,33.8],
-  school:['layer2_school',73.8,40.6],
-  hospital:['layer2_hospital',47.8,47.0],
-  fire:['layer2_fire',22.2,51.5],
-  power:['layer2_power',87.8,48.0],
-  industry:['layer2_industry',89.0,62.3],
-  park:['layer2_park',67.0,71.9],
-  roads:['layer2_roads',15.6,59.0],
-  port:['layer2_port',20.3,77.5],
-  housing:['layer2_housing',54.9,57.1],
-  shopping:['layer2_shopping',66.0,56.2]
+  university:['layer2_university_full'],
+  police:['layer2_police_full'],
+  stadium:['layer2_stadium_full'],
+  school:['layer2_school_full'],
+  hospital:['layer2_hospital_full'],
+  fire:['layer2_fire_full'],
+  power:['layer2_power_full'],
+  industry:['layer2_industry_full'],
+  park:['layer2_park_full'],
+  roads:['layer2_roads_full'],
+  port:['layer2_port_full'],
+  housing:['layer2_housing_full'],
+  shopping:['layer2_shopping_full']
  };
  let ev=(S.damages||[])[0]||null;
- const lotSize={university:[18,12],police:[15,9],stadium:[18,11],school:[15,9],hospital:[16,10],fire:[15,9],power:[17,10],industry:[17,10],park:[18,11],roads:[16,9],port:[18,10],housing:[17,10],shopping:[17,10]};
+ const buildingMeta={university:{x:45.654,y:29.725,w:55.566,h:29.670},police:{x:18.896,y:40.330,w:32.715,h:13.956},stadium:{x:88.818,y:36.236,w:22.363,h:15.000},school:{x:73.730,y:42.088,w:30.273,h:12.967},hospital:{x:48.096,y:47.335,w:31.543,h:15.330},fire:{x:22.217,y:51.154,w:29.004,h:12.308},power:{x:86.279,y:48.407,w:27.441,h:16.044},industry:{x:87.646,y:60.412,w:24.707,h:15.000},park:{x:66.846,y:68.352,w:40.137,h:14.176},roads:{x:17.773,y:57.665,w:35.547,h:15.220},port:{x:20.312,y:73.187,w:33.594,h:13.407},housing:{x:54.932,y:56.071,w:21.973,h:12.912},shopping:{x:66.016,y:55.137,w:22.461,h:12.912}};
  const buildings=Object.entries(assets).map(([k,a])=>{
-   const lv=levels[k]||0; const [file,x,y]=a; const [lw,lh]=lotSize[k]||[16,10];
-   return `<div class="home-map-layer ${lv?'unlocked':'locked'} level-${Math.min(lv||1,5)}" style="--lot-x:${x}%;--lot-y:${y}%;--lot-w:${lw}%;--lot-h:${lh}%;">
-     ${!lv?`<span class="lot-dark"></span>`:''}
-     <img src="${ASSET((lv?file:file+'_locked')+'.png')}" alt="${esc(names[k]||k)}" loading="eager">
-     ${!lv?`<span class="map-shadow"></span><span class="map-lock" style="left:${x}%;top:${y}%">🔒</span>`:''}
-   </div>`;
+   const lv=levels[k]||0; const file=a[0]; const m=buildingMeta[k]||{x:50,y:50,w:16,h:10}; const locked=!lv;
+   return `<div class="home-map-layer ${locked?'locked':'unlocked'} level-${Math.min(lv||1,5)}" style="--lot-x:${m.x}%;--lot-y:${m.y}%;--lot-w:${m.w}%;--lot-h:${m.h}%;">${locked?`<span class="lot-dark"></span>`:''}<img src="${ASSET(file+(locked?'_locked':'')+'.png')}" alt="${esc(names[k]||k)}" loading="eager">${locked?`<span class="map-shadow"></span><span class="map-lock" style="left:${m.x}%;top:${m.y}%">🔒</span>`:''}</div>`;
  }).join('');
  let weather='';
  if(ev){let dn=String(ev.disaster_name||'');if(/⚡|صاعقه|رعد/.test(dn))weather='<div class="weather show"><div class="stormflash"></div><div class="lightning">⚡</div></div>';else if(/🔥|آتش/.test(dn))weather='<div class="weather show"><div class="fireglow" style="right:25%;top:42%"></div><div class="smokecloud" style="right:27%;top:31%"></div></div>';else if(/🌧️|باران|سیل|🌊|برف|❄/.test(dn))weather='<div class="weather show"></div>';}
- return `<div class="town"><div class="map-stage"><img class="map-bg" src="${ASSET_DATA['city_map.png'] || MAP_SRC}" onerror="this.onerror=null;this.src=MAP_SRC" alt="نقشه اصلی شهر" draggable="false"><div class="ground">${buildings}</div>${weather}</div><div class="home-hud">
+ return `<div class="town"><div class="map-stage"><img class="map-bg" src="${ASSET('city_map_full.png')}" onerror="this.onerror=null;this.src=MAP_SRC" alt="نقشه اصلی شهر" draggable="false"><div class="ground">${buildings}</div>${weather}</div><div class="home-hud">
    <div class="hud-card mayor-card"><div class="hud-avatar"><img class="telegram-avatar loading" src="${ASSET('mayor_avatar.png')}" alt="پروفایل" referrerpolicy="no-referrer" data-telegram-avatar></div><div class="hud-main"><div class="line1">👑 ${esc(S.player?.first_name||'شهردار')}</div><div class="line2">سطح ${num(S.player?.level||c.city_level||1)}</div><div class="hud-xp"><i style="width:${Math.max(0,Math.min(100,Number(S.player?.xp||0)%100))}%"></i></div><div class="hud-xptext">${num(S.player?.xp||0)} XP</div></div></div>
    <div class="hud-card hud-city-card"><div class="hud-city-title">🏙️ ${esc(c.city_name||'شهر من')}</div><div class="hud-city-pop">👥 جمعیت: ${num(c.population)}</div></div>
    <div class="hud-card hud-res-card"><div class="hud-res">🪙 ${num(S.resources?.coins)}</div><div class="hud-res">🍎 ${num(S.resources?.food)}</div><div class="hud-res">🧱 ${num(S.resources?.materials)}</div><div class="hud-res">⚡ ${num(S.resources?.energy)}</div><div class="hud-res">💧 ${num(S.resources?.water)}</div><div class="hud-res">🧰 ${num(S.resources?.equipment)}</div></div>
@@ -311,7 +297,7 @@ function scene(withUI=true){
  </div>
  <div class="home-side"><div class="side-card"><div class="ico">😊</div><div class="txt"><div class="name">رضایت مردم</div><div class="bar"><i style="width:${Math.max(0,Math.min(100,Number(c.satisfaction||0)))}%"></i></div><div class="val">${num(c.satisfaction)}%</div></div></div><div class="side-card"><div class="ico">🪙</div><div class="txt"><div class="name">مالیات</div><div class="val">${num(c.tax_rate)}%</div></div></div></div>
  ${ev?`<div class="home-weather"><div class="side-card"><div class="ico">🌧️</div><div class="txt"><div class="name">${esc(ev.disaster_name||'بلای طبیعی')}</div><div class="val">فعال · تا زمان تعمیر/حل حادثه</div></div></div></div>`:''}
- <div id="homeNotify" class="home-notify-stack hidden"></div>
+ <div id="homeNotify" class="home-notify-stack hidden" style="display:none!important"></div>
  </div>`;
 }
 function home(){return scene(true)}
@@ -357,16 +343,11 @@ function showHomeNotifications(force=false){
 function updateHomeNotifications(){showHomeNotifications(false)}
 async function refreshState(silent=false){try{let oldEvent=S?.live_events?.[0]?.id;let oldNews=S?.news?.[0]?.id||S?.news?.[0]?.created_at;let page=currentPage;let d=await api('/webapp/api/state');if(d?.ok===false)throw Error(d.message||'خطا');S=d;document.getElementById('mayor').textContent='👑 '+(S.player?.first_name||'شهردار');show(page);let newEvent=S.live_events?.[0];let newNews=S.news?.[0];if(!silent&&newEvent&&newEvent.id!==oldEvent)toast('🚨 '+(newEvent.disaster_name||'حادثه جدید')+' در شهرت رخ داد!');if(!silent&&newNews&&(newNews.id||newNews.created_at)!==(oldNews))toast('📰 '+(newNews.text||'خبر جدید شهر'));if(page==='home'){showHomeNotifications(false);loadTelegramAvatar()} }catch(e){if(!silent)toast('❌ '+(e.message||'خطا در بروزرسانی'))}}
 async function loadTelegramAvatar(){
-  const imgs=document.querySelectorAll('[data-telegram-avatar]');
-  if(!imgs.length)return;
-  try{
-    const r=await api('/webapp/api/avatar');
-    if(!r?.ok||!r?.data_url)throw Error('avatar unavailable');
-    imgs.forEach(img=>{img.src=r.data_url;img.classList.remove('loading')});
-  }catch(e){
-    // Fallback remains the local avatar asset; never depend on Telegram CDN/CORS.
-    imgs.forEach(img=>img.classList.remove('loading'));
-  }
+ const imgs=document.querySelectorAll('[data-telegram-avatar]'); if(!imgs.length)return;
+ const photoUrl=tg?.initDataUnsafe?.user?.photo_url||'';
+ if(photoUrl) imgs.forEach(img=>{img.src=photoUrl;img.classList.remove('loading')});
+ try{const r=await api('/webapp/api/avatar'); if(r?.ok&&r?.data_url){imgs.forEach(img=>{img.src=r.data_url;img.classList.remove('loading')});return;}}catch(e){}
+ imgs.forEach(img=>img.classList.remove('loading'));
 }
 async function load(){try{S=await api('/webapp/api/state');if(S?.ok===false)throw Error(S.message||'خطا');document.getElementById('mayor').textContent='👑 '+(S.player?.first_name||'شهردار');show('home');homeSessionStarted=false;showHomeNotifications(true);loadTelegramAvatar()}catch(e){document.getElementById('app').innerHTML='<div class="loader">❌ '+esc(e.message||'خطای نامشخص')+'<br><small>Mini App نتوانست اطلاعات شهر را دریافت کند.</small></div>'}}
 async function act(payload){try{let page=currentPage;let d=await api('/webapp/api/action',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});toast(d.message||'انجام شد');let fresh=await api('/webapp/api/state');if(fresh?.ok===false)throw Error(fresh.message||'خطا');S=fresh;document.getElementById('mayor').textContent='👑 '+(S.player?.first_name||'شهردار');show(page);loadTelegramAvatar()}catch(e){toast('❌ '+e.message)}}

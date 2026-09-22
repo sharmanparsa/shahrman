@@ -174,6 +174,16 @@ body{background:#06131b}
 .city-building.locked{filter:brightness(.20) saturate(.25) drop-shadow(0 7px 5px #000b)!important}
 .city-building.locked img{opacity:.98}
 .city-building .lock-badge{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:38%;height:38%;border-radius:50%;background:#09151ddd;border:2px solid #c7d0d3;display:flex;align-items:center;justify-content:center;font-size:clamp(20px,5vw,44px);line-height:1;box-shadow:0 3px 12px #000b;text-shadow:0 2px 3px #000}
+
+/* HOME MAP ALIGNMENT FIX */
+.home-mode .town{background-size:100% 100%!important;background-position:center!important}
+.home-mode .ground{position:absolute!important;inset:0!important;width:100%!important;height:100%!important}
+.home-mode .city-building{z-index:35!important}
+.home-mode .city-building img{object-fit:contain!important}
+.home-mode .city-building.locked{filter:brightness(.16) saturate(.2) drop-shadow(0 9px 7px #000c)!important}
+.home-mode .city-building .lock-badge{width:34%;height:34%;font-size:clamp(22px,5vw,46px);background:#071118e8;border:2px solid #a8b2b5}
+.home-mode .weather{z-index:1!important}
+.home-mode .weather .rain,.home-mode .weather .stormflash,.home-mode .weather .lightning{display:none!important}
 </style></head>
 <body>
 <div class="app"><div class="top"><div class="title">🏙️ شهر من</div><div class="pill" id="mayor">در حال ورود...</div></div><main id="app"><div class="loader">در حال بارگذاری شهر...</div></main></div>
@@ -221,23 +231,25 @@ function buildingMarkup(k,lv,label){
 }
 function scene(withUI=true){
  let c=S.city||{}, levels=Object.fromEntries((S.buildings||[]).map(x=>[x.type,Number(x.level||0)]));
+ // Building lots are anchored to the centers of the empty square plots in city_map.png.
+ // Coordinates are percentages of the full map so the buildings stay on their lots on every phone size.
  const assets={
-  housing:['house_a',23,27,15],
-  university:['university',43,27,21],
-  police:['police',21,37,17],
-  shopping:['house_b',70,35,15],
-  stadium:['stadium',88,38,23],
-  school:['school',69,47,15],
-  hospital:['hospital',48,52,17],
-  fire:['fire',20,61,16],
-  emergency:['emergency',34,66,13],
-  power:['power',75,66,16],
-  water:['water',83,76,13],
-  park:['park',66,79,18],
-  roads:['roads',9,73,14],
-  waste:['waste',86,84,13],
-  recycling:['waste',61,88,13],
-  industry:['industry',13,87,18]
+  housing:['house_a',18,24,20],
+  university:['university',44,25,25],
+  police:['police',18,39,22],
+  shopping:['house_b',67,30,20],
+  stadium:['stadium',87,34,27],
+  school:['school',68,44,21],
+  hospital:['hospital',46,45,23],
+  fire:['fire',20,56,22],
+  emergency:['emergency',36,59,18],
+  power:['power',72,61,22],
+  water:['water',84,69,19],
+  park:['park',70,70,24],
+  roads:['roads',18,69,18],
+  waste:['waste',85,57,20],
+  recycling:['waste',57,76,20],
+  industry:['industry',24,73,23]
  };
  let ev=S.live_events?.[0];
  const buildings=Object.entries(assets).map(([k,a])=>{
@@ -247,7 +259,7 @@ function scene(withUI=true){
    </div>`;
  }).join('');
  let weather='';
- if(ev){let dn=String(ev.disaster_name||'');if(/⚡|صاعقه|رعد/.test(dn))weather='<div class="weather show"><div class="stormflash"></div><div class="lightning">⚡</div></div>';else if(/🔥|آتش/.test(dn))weather='<div class="weather show"><div class="fireglow" style="right:25%;top:42%"></div><div class="smokecloud" style="right:27%;top:31%"></div></div>';else if(/🌧️|باران|سیل|🌊|برف|❄/.test(dn))weather='<div class="weather show"><div class="rain"></div></div>';}
+ if(ev){let dn=String(ev.disaster_name||'');if(/⚡|صاعقه|رعد/.test(dn))weather='<div class="weather show"><div class="stormflash"></div><div class="lightning">⚡</div></div>';else if(/🔥|آتش/.test(dn))weather='<div class="weather show"><div class="fireglow" style="right:25%;top:42%"></div><div class="smokecloud" style="right:27%;top:31%"></div></div>';else if(/🌧️|باران|سیل|🌊|برف|❄/.test(dn))weather='<div class="weather show"></div>';}
  return `<div class="town"><div class="ground">${buildings}</div>${weather}<div class="home-hud">
    <div class="hud-card mayor-card"><div class="hud-avatar" style="background-image:url('${ASSET('mayor.png')}');background-size:auto 100%;background-repeat:no-repeat;background-position:left center"></div><div class="hud-main"><div class="line1">👑 ${esc(S.player?.first_name||'شهردار')}</div><div class="line2">سطح ${num(S.player?.level||c.city_level||1)}</div><div class="hud-xp"><i style="width:${Math.max(0,Math.min(100,Number(S.player?.xp||0)%100))}%"></i></div><div class="hud-xptext">${num(S.player?.xp||0)} XP</div></div></div>
    <div class="hud-card hud-city-card"><div class="hud-city-title">🏙️ ${esc(c.city_name||'شهر من')}</div><div class="hud-city-pop">👥 جمعیت: ${num(c.population)}</div></div>

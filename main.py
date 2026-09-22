@@ -1,3 +1,4 @@
+from pathlib import Path
 import asyncio
 import logging
 import os
@@ -5,6 +6,7 @@ import random
 import hashlib
 import hmac
 import json
+import base64
 from urllib.parse import parse_qsl
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -14,6 +16,7 @@ from io import BytesIO
 from PIL import Image, ImageDraw, ImageFont
 
 import asyncpg
+import aiohttp
 from aiohttp import web
 from aiogram import Bot, Dispatcher, F
 from aiogram.dispatcher.middlewares.base import BaseMiddleware
@@ -6193,6 +6196,42 @@ async def _miniapp_user(request):
     raise web.HTTPUnauthorized(text="Telegram WebApp authentication failed")
 
 
+_avatar_cache = {}
+
+async def miniapp_avatar(request):
+    """Return the current Telegram profile photo as a same-origin data URL.
+
+    The browser never loads the Telegram CDN directly, which avoids Telegram
+    WebView/CORS/referrer/cache issues that made profile photos intermittently blank.
+    """
+    user_id = await _miniapp_user(request)
+    now_ts = int(datetime.now(timezone.utc).timestamp())
+    cached = _avatar_cache.get(user_id)
+    if cached and now_ts - cached[0] < 300:
+        return web.json_response({"ok": True, "data_url": cached[1]})
+    try:
+        photos = await bot.get_user_profile_photos(user_id=user_id, limit=1)
+        if not photos or not photos.photos:
+            return web.json_response({"ok": False, "message": "profile photo not found"})
+        sizes = photos.photos[0]
+        best = sizes[-1]
+        tg_file = await bot.get_file(best.file_id)
+        if not tg_file or not tg_file.file_path:
+            return web.json_response({"ok": False, "message": "profile photo file not found"})
+        url = f"https://api.telegram.org/file/bot{BOT_TOKEN}/{tg_file.file_path}"
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15)) as session:
+            async with session.get(url, timeout=15) as resp:
+                if resp.status != 200:
+                    return web.json_response({"ok": False, "message": "profile photo download failed"}, status=502)
+                raw = await resp.read()
+                content_type = (resp.headers.get("Content-Type") or "image/jpeg").split(";",1)[0]
+        data_url = f"data:{content_type};base64,{base64.b64encode(raw).decode('ascii')}"
+        _avatar_cache[user_id] = (now_ts, data_url)
+        return web.json_response({"ok": True, "data_url": data_url})
+    except Exception:
+        logging.exception("Mini App avatar fetch failed for user %s", user_id)
+        return web.json_response({"ok": False, "message": "profile photo unavailable"}, status=200)
+
 async def miniapp_state(request):
     # Keep the Mini App read-only endpoint resilient: a failed background tick or
     # a legacy/missing optional table must not turn the whole Mini App into HTTP 500.
@@ -6270,7 +6309,7 @@ async def miniapp_state(request):
 
             news_rows = []
             try:
-                news_rows = await conn.fetch("SELECT text,created_at FROM news WHERE user_id=$1 ORDER BY created_at DESC LIMIT 15", user_id)
+                news_rows = await conn.fetch("SELECT id,text,created_at FROM news WHERE user_id=$1 ORDER BY created_at DESC LIMIT 15", user_id)
             except Exception:
                 logging.exception("Mini App: news read failed")
 
@@ -6289,7 +6328,7 @@ async def miniapp_state(request):
                 live_events = await conn.fetch(
                     """SELECT id,disaster_name,building_type,damage,created_at,repaired
                        FROM natural_disaster_events
-                       WHERE user_id=$1 AND created_at >= NOW() - INTERVAL '6 hours'
+                       WHERE user_id=$1 AND created_at >= NOW() - INTERVAL '24 hours'
                        ORDER BY created_at DESC LIMIT 8""", user_id
                 )
             except Exception:
@@ -6495,10 +6534,7 @@ async def health(request):
 async def start_web_server():
     app = web.Application()
 
-    app.router.add_get(
-        "/",
-        health,
-    )
+    app.router.add_get("/", miniapp_page)
 
     app.router.add_get(
         "/health",
@@ -6507,6 +6543,8 @@ async def start_web_server():
 
     app.router.add_get("/webapp", miniapp_page)
     app.router.add_get("/webapp/", miniapp_page)
+    app.router.add_static("/webapp/assets", path=str(Path(__file__).with_name("webapp") / "assets"), name="webapp-assets")
+    app.router.add_get("/webapp/api/avatar", miniapp_avatar)
     app.router.add_get("/webapp/api/state", miniapp_state)
     app.router.add_post("/webapp/api/action", miniapp_action)
 

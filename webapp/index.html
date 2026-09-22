@@ -181,7 +181,9 @@ body{background:#06131b}
 .home-mode .town{background:transparent!important}
 .home-mode .ground{position:absolute!important;inset:0!important;width:100%!important;height:100%!important}
 .home-mode .city-building{z-index:35!important}
-.home-mode .city-building img{object-fit:contain!important}
+.home-mode .city-building img{display:block;width:100%;height:auto;object-fit:contain!important}
+.city-building{position:absolute;pointer-events:none;line-height:0;transform-origin:center center}
+.city-building img{display:block;width:100%;height:auto;object-fit:contain}
 .home-mode .city-building.locked{filter:brightness(.16) saturate(.2) drop-shadow(0 9px 7px #000c)!important}
 .home-mode .city-building .lock-badge{width:34%;height:34%;font-size:clamp(22px,5vw,46px);background:#071118e8;border:2px solid #a8b2b5}
 .home-mode .weather{display:none!important;z-index:1!important}
@@ -236,28 +238,30 @@ function scene(withUI=true){
  // Building lots are anchored to the centers of the empty square plots in city_map.png.
  // Coordinates are percentages of the full map so the buildings stay on their lots on every phone size.
  const assets={
-  university:['university',45.0,29.0,24.0],
-  police:['police',19.5,36.0,19.0],
-  stadium:['stadium',90.8,31.8,19.0],
-  school:['school',72.5,38.5,18.0],
-  hospital:['hospital',47.7,46.5,18.5],
-  fire:['fire',19.5,51.0,19.0],
-  power:['power',89.0,49.2,19.0],
-  park:['park',65.2,70.4,18.5],
-  industry:['industry',87.0,62.5,16.0],
-  roads:['roads',12.0,64.5,17.0],
-  port:['port',12.0,80.0,22.0],
-  housing:['house_b',29.0,62.5,14.0],
-  shopping:['house_a',61.0,58.5,14.0],
-  water:['water',89.0,49.0,17.0],
-  emergency:['emergency',91.0,60.5,14.0],
-  waste:['waste',73.5,55.0,13.0],
-  recycling:['waste',39.0,68.5,13.0]
+  // Each entry is [image, centerX%, centerY%, width%, rotation].
+  // The centers/widths are matched to the actual buildings visible in city_map.png.
+  university:['university',46.14,24.58,19.04,0],
+  police:['police',19.29,36.62,20.02,0],
+  stadium:['stadium',91.99,32.39,16.02,0],
+  school:['school',74.46,39.71,18.07,0],
+  hospital:['hospital',46.63,47.36,19.04,0],
+  fire:['fire',19.53,49.64,21.48,0],
+  power:['power',88.62,47.36,21.00,0],
+  park:['park',67.14,70.31,23.93,0],
+  industry:['industry',88.87,62.50,20.51,0],
+  roads:['roads',12.45,77.15,21.00,0],
+  port:['port',11.96,79.43,22.95,0],
+  housing:['house_b',63.96,55.83,22.46,0],
+  shopping:['house_a',65.43,55.34,21.48,0],
+  water:['water',88.62,47.36,21.00,0],
+  emergency:['emergency',89.60,61.85,18.07,0],
+  waste:['waste',73.49,55.01,17.09,0],
+  recycling:['waste',35.16,68.68,21.48,0]
  };
  let ev=S.live_events?.[0];
  const buildings=Object.entries(assets).map(([k,a])=>{
-   const lv=levels[k]||0; const [file,x,y,w]=a; const damaged=ev&&ev.building_type===k;
-   return `<div class="city-building ${lv?'unlocked':'locked'} level-${Math.min(lv||1,5)}${damaged?' damaged':''}" style="left:${x}%;top:${y}%;width:${w}%;aspect-ratio:1/1;">
+   const lv=levels[k]||0; const [file,x,y,w,rot]=a; const damaged=ev&&ev.building_type===k;
+   return `<div class="city-building ${lv?'unlocked':'locked'} level-${Math.min(lv||1,5)}${damaged?' damaged':''}" style="left:${x}%;top:${y}%;width:${w}%;transform:translate(-50%,-50%) rotate(${rot}deg);">
      <img src="${ASSET(file+'.png')}" alt="${esc(names[k]||k)}" loading="eager">${!lv?'<span class="lock-badge">🔒</span>':''}${damaged?'<span class="damage-badge">⚠️</span>':''}
    </div>`;
  }).join('');

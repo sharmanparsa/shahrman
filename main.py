@@ -1,3 +1,4 @@
+from pathlib import Path
 import asyncio
 import logging
 import os
@@ -5,6 +6,7 @@ import random
 import hashlib
 import hmac
 import json
+import base64
 from urllib.parse import parse_qsl
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -14,6 +16,7 @@ from io import BytesIO
 from PIL import Image, ImageDraw, ImageFont
 
 import asyncpg
+import aiohttp
 from aiohttp import web
 from aiogram import Bot, Dispatcher, F
 from aiogram.dispatcher.middlewares.base import BaseMiddleware
@@ -374,6 +377,19 @@ BUILDINGS = {
 # =========================================================
 # CRISES
 # =========================================================
+
+INFRASTRUCTURES = {
+    "roads": {"name":"🛣️ راه‌ها و حمل‌ونقل","description":"بهبود کیفیت جاده‌ها و دسترسی شهری.","levels":["راه خاکی","آسفالت شهری","بلوارها","بزرگراه","شبکه هوشمند"],"costs":[500,1200,3000,7000,14000],"effects":[{"infrastructure":5,"income_pct":2,"population":2,"satisfaction":2},{"infrastructure":7,"income_pct":3,"population":3,"satisfaction":3},{"infrastructure":9,"income_pct":5,"population":5,"satisfaction":4},{"infrastructure":12,"income_pct":7,"population":7,"satisfaction":5},{"infrastructure":16,"income_pct":10,"population":10,"satisfaction":7}]},
+    "water_sewage": {"name":"💧 آب و فاضلاب","description":"آب سالم، جمع‌آوری فاضلاب و بازچرخانی آب.","levels":["آبرسانی اولیه","شبکه شهری","تصفیه‌خانه","بازچرخانی","مدیریت هوشمند"],"costs":[450,1200,3000,6500,12000],"effects":[{"infrastructure":5,"income_pct":1,"population":2,"satisfaction":3},{"infrastructure":7,"income_pct":2,"population":3,"satisfaction":4},{"infrastructure":9,"income_pct":3,"population":4,"satisfaction":5},{"infrastructure":12,"income_pct":4,"population":6,"satisfaction":6},{"infrastructure":16,"income_pct":6,"population":9,"satisfaction":8}]},
+    "power_grid": {"name":"⚡ شبکه برق","description":"تأمین پایدار برق و کاهش قطعی‌ها.","levels":["شبکه محلی","شبکه شهری","برق پایدار","شبکه هوشمند","فوق‌پایدار"],"costs":[550,1400,3300,7500,14000],"effects":[{"infrastructure":5,"income_pct":2,"population":2,"satisfaction":2},{"infrastructure":7,"income_pct":3,"population":3,"satisfaction":3},{"infrastructure":10,"income_pct":5,"population":5,"satisfaction":4},{"infrastructure":13,"income_pct":7,"population":7,"satisfaction":5},{"infrastructure":17,"income_pct":10,"population":10,"satisfaction":7}]},
+    "internet": {"name":"🌐 اینترنت و ارتباطات","description":"ارتقای ارتباطات از 2G تا 5G و فیبر نوری.","levels":["2G","3G","4G","4.5G + فیبر","5G + فیبر"],"costs":[400,1000,2500,6000,12000],"effects":[{"infrastructure":4,"income_pct":2,"population":2,"satisfaction":1},{"infrastructure":6,"income_pct":3,"population":3,"satisfaction":2},{"infrastructure":8,"income_pct":5,"population":5,"satisfaction":3},{"infrastructure":11,"income_pct":8,"population":7,"satisfaction":4},{"infrastructure":15,"income_pct":12,"population":10,"satisfaction":6}]},
+    "public_transport": {"name":"🚌 حمل‌ونقل عمومی","description":"اتوبوس، BRT و مترو برای جابه‌جایی سریع شهروندان.","levels":["اتوبوس شهری","خطوط سریع","BRT","مترو","حمل‌ونقل هوشمند"],"costs":[500,1400,3200,7500,15000],"effects":[{"infrastructure":5,"income_pct":2,"population":2,"satisfaction":2},{"infrastructure":7,"income_pct":3,"population":3,"satisfaction":3},{"infrastructure":9,"income_pct":4,"population":5,"satisfaction":4},{"infrastructure":12,"income_pct":6,"population":7,"satisfaction":6},{"infrastructure":16,"income_pct":9,"population":10,"satisfaction":8}]},
+    "gas": {"name":"🔥 شبکه گاز","description":"پایداری سوخت شهری و گرمایش امن.","levels":["شبکه محلی","شبکه شهری","فشار پایدار","گاز هوشمند","شبکه پاک"],"costs":[450,1100,2800,6500,12000],"effects":[{"infrastructure":4,"income_pct":1,"population":1,"satisfaction":2},{"infrastructure":6,"income_pct":2,"population":2,"satisfaction":3},{"infrastructure":8,"income_pct":3,"population":4,"satisfaction":4},{"infrastructure":11,"income_pct":5,"population":6,"satisfaction":5},{"infrastructure":14,"income_pct":7,"population":8,"satisfaction":7}]},
+    "waste": {"name":"🗑️ پسماند و بازیافت","description":"جمع‌آوری، تفکیک، بازیافت و کاهش آلودگی.","levels":["جمع‌آوری","تفکیک","بازیافت","تبدیل انرژی","چرخه کامل"],"costs":[400,1000,2400,5500,11000],"effects":[{"infrastructure":4,"income_pct":1,"population":1,"satisfaction":2},{"infrastructure":6,"income_pct":2,"population":2,"satisfaction":3},{"infrastructure":8,"income_pct":3,"population":3,"satisfaction":4},{"infrastructure":11,"income_pct":4,"population":5,"satisfaction":5},{"infrastructure":14,"income_pct":6,"population":7,"satisfaction":7}]},
+    "telecom": {"name":"📡 مخابرات","description":"پوشش ارتباطی، فیبر و زیرساخت مخابراتی شهر.","levels":["آنتن محلی","پوشش شهری","4G+","فیبر نوری","شبکه یکپارچه"],"costs":[450,1100,2600,6000,11500],"effects":[{"infrastructure":4,"income_pct":2,"population":1,"satisfaction":1},{"infrastructure":6,"income_pct":3,"population":2,"satisfaction":2},{"infrastructure":8,"income_pct":4,"population":4,"satisfaction":3},{"infrastructure":11,"income_pct":6,"population":6,"satisfaction":4},{"infrastructure":14,"income_pct":9,"population":8,"satisfaction":6}]},
+    "drainage": {"name":"🌧️ آب‌های سطحی و سیلاب","description":"هدایت آب باران و کاهش خسارت سیلاب.","levels":["جوی شهری","شبکه آبرو","شبکه فاضلاب","مدیریت سیلاب","سیستم هوشمند"],"costs":[400,1000,2300,5200,10000],"effects":[{"infrastructure":4,"income_pct":1,"population":1,"satisfaction":2},{"infrastructure":6,"income_pct":2,"population":2,"satisfaction":3},{"infrastructure":8,"income_pct":3,"population":3,"satisfaction":4},{"infrastructure":11,"income_pct":4,"population":5,"satisfaction":5},{"infrastructure":14,"income_pct":6,"population":7,"satisfaction":7}]},
+    "emergency_network": {"name":"🚑 شبکه امداد شهری","description":"هماهنگی آتش‌نشانی، اورژانس و واکنش سریع.","levels":["پایگاه امداد","شبکه امداد","مرکز کنترل","واکنش سریع","شبکه یکپارچه"],"costs":[500,1200,2800,6500,12500],"effects":[{"infrastructure":5,"income_pct":1,"population":1,"satisfaction":2},{"infrastructure":7,"income_pct":2,"population":2,"satisfaction":3},{"infrastructure":9,"income_pct":3,"population":3,"satisfaction":4},{"infrastructure":12,"income_pct":4,"population":5,"satisfaction":5},{"infrastructure":15,"income_pct":6,"population":7,"satisfaction":7}]},
+}
 
 CRISES = {
     "theft": {
@@ -990,6 +1006,16 @@ async def init_db():
             WHERE completed=FALSE
             """
         )
+        await conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS city_infrastructure (
+                user_id BIGINT REFERENCES players(user_id) ON DELETE CASCADE,
+                infrastructure_type TEXT NOT NULL,
+                level INTEGER DEFAULT 0,
+                PRIMARY KEY(user_id, infrastructure_type)
+            )
+            """
+        )
 
         await conn.execute(
             """
@@ -1344,6 +1370,21 @@ async def get_resources(user_id):
         )
 
 
+async def ensure_infrastructure_rows(user_id):
+    async with db_pool.acquire() as conn:
+        for key in INFRASTRUCTURES:
+            await conn.execute(
+                "INSERT INTO city_infrastructure(user_id,infrastructure_type,level) VALUES($1,$2,0) ON CONFLICT(user_id,infrastructure_type) DO NOTHING",
+                user_id, key,
+            )
+
+async def get_infrastructure(user_id):
+    await ensure_infrastructure_rows(user_id)
+    async with db_pool.acquire() as conn:
+        rows=await conn.fetch("SELECT infrastructure_type,level FROM city_infrastructure WHERE user_id=$1 ORDER BY infrastructure_type",user_id)
+    return [{"type":r["infrastructure_type"],"level":int(r["level"] or 0)} for r in rows]
+
+
 # =========================================================
 # XP
 # =========================================================
@@ -1418,6 +1459,10 @@ async def recalculate_city(user_id):
             """,
             user_id,
         )
+        infra_rows = await conn.fetch(
+            "SELECT infrastructure_type,level FROM city_infrastructure WHERE user_id=$1",
+            user_id,
+        )
 
         stats = {
             "security": 0,
@@ -1470,6 +1515,20 @@ async def recalculate_city(user_id):
             elif row["building_type"] == "roads":
                 housing_bonus += level * 20
 
+        infra_income_pct = 0
+        infra_population_bonus = 0
+        infra_satisfaction_bonus = 0
+        for row in infra_rows:
+            data = INFRASTRUCTURES.get(row["infrastructure_type"])
+            level = max(0, min(5, int(row["level"] or 0)))
+            if not data or level <= 0:
+                continue
+            for effect in data["effects"][:level]:
+                stats["infrastructure"] += effect["infrastructure"]
+                infra_income_pct += effect["income_pct"]
+                infra_population_bonus += effect["population"]
+                infra_satisfaction_bonus += effect["satisfaction"]
+
         pollution_net = max(
             0,
             pollution - stats["pollution_control"],
@@ -1489,6 +1548,7 @@ async def recalculate_city(user_id):
             150
             + city["land"] * 100
             + housing_bonus
+            + infra_population_bonus * 10
         )
 
         jobs = max(
@@ -1508,16 +1568,18 @@ async def recalculate_city(user_id):
             + stats["education"] // 10
             + stats["recreation"] // 10
             + stats["infrastructure"] // 10
+            + infra_satisfaction_bonus
             - pollution_net // 3
             - max(
                 0,
                 city["population"] - housing,
             ) // 20
-            - max(
-                0,
-                city["tax_rate"] - 10,
-            ) * 2
         )
+
+        tax_steps_up = max(0, city["tax_rate"] - 10) // 2
+        tax_steps_down = max(0, 10 - city["tax_rate"]) // 2
+        tax_satisfaction_factor = 1.0 - (tax_steps_up * 0.10) + (tax_steps_down * 0.15)
+        satisfaction = int(round(satisfaction * tax_satisfaction_factor))
 
         satisfaction = clamp(
             satisfaction,
@@ -1622,6 +1684,17 @@ async def collect_income(user_id):
             maintenance = 0
             building_income_hourly = 0
             building_materials_hourly = 0
+            infra_income_pct = 0
+            infra_rows = await conn.fetch(
+                "SELECT infrastructure_type,level FROM city_infrastructure WHERE user_id=$1",
+                user_id,
+            )
+            for row in infra_rows:
+                data = INFRASTRUCTURES.get(row["infrastructure_type"])
+                level = max(0, min(5, int(row["level"] or 0)))
+                if data:
+                    for effect in data["effects"][:level]:
+                        infra_income_pct += effect["income_pct"]
 
             rows = await conn.fetch(
                 """
@@ -1657,7 +1730,11 @@ async def collect_income(user_id):
                 tax_income + economic_income + (building_income_hourly // 2),
             )
 
-            final_income = max(25, base_income - maintenance) * periods
+            tax_steps_up = max(0, city["tax_rate"] - 10) // 2
+            tax_steps_down = max(0, 10 - city["tax_rate"]) // 2
+            tax_income_factor = 1.0 + (tax_steps_up * 0.20) - (tax_steps_down * 0.10)
+            infra_income_factor = 1.0 + (infra_income_pct / 100.0)
+            final_income = max(25, int((base_income - maintenance) * tax_income_factor * infra_income_factor)) * periods
             material_gain = 10 * periods + (building_materials_hourly * periods)
 
             await conn.execute(
@@ -2330,6 +2407,7 @@ async def ensure_callback_player(user_id):
             """,
             user_id,
         )
+    await ensure_infrastructure_rows(user_id)
 
 
 # =========================================================
@@ -5171,6 +5249,10 @@ async def process_player_tick(user_id):
                 """,
                 user_id,
             )
+            infra_rows = await conn.fetch(
+                "SELECT infrastructure_type,level FROM city_infrastructure WHERE user_id=$1",
+                user_id,
+            )
 
             stats = {
                 "security": 0,
@@ -5189,6 +5271,8 @@ async def process_player_tick(user_id):
             job_bonus = 0
             pollution = 0
             housing_bonus = 0
+            infra_population_bonus = 0
+            infra_satisfaction_bonus = 0
 
             for row in rows:
                 building = BUILDINGS.get(
@@ -5234,6 +5318,16 @@ async def process_player_tick(user_id):
                 elif row["building_type"] == "roads":
                     housing_bonus += level * 20
 
+            for row in infra_rows:
+                data = INFRASTRUCTURES.get(row["infrastructure_type"])
+                level = max(0, min(5, int(row["level"] or 0)))
+                if not data or level <= 0:
+                    continue
+                for effect in data["effects"][:level]:
+                    stats["infrastructure"] += effect["infrastructure"]
+                    infra_population_bonus += effect["population"]
+                    infra_satisfaction_bonus += effect["satisfaction"]
+
             pollution_net = max(
                 0,
                 pollution
@@ -5244,6 +5338,7 @@ async def process_player_tick(user_id):
                 150
                 + city["land"] * 100
                 + housing_bonus
+                + infra_population_bonus * 10
             )
 
             jobs = max(
@@ -5370,15 +5465,6 @@ async def process_player_tick(user_id):
                     ),
                 )
 
-            if city["tax_rate"] > 15:
-                satisfaction_change -= min(
-                    5,
-                    (
-                        city["tax_rate"]
-                        - 15
-                    ) // 2,
-                )
-
             if stats["security"] >= 60:
                 satisfaction_change += 1
 
@@ -5393,6 +5479,8 @@ async def process_player_tick(user_id):
 
             if stats["infrastructure"] >= 60:
                 satisfaction_change += 1
+
+            satisfaction_change += min(3, infra_satisfaction_bonus // 20)
 
             if stats["water"] < 20:
                 satisfaction_change -= 2
@@ -5489,6 +5577,10 @@ async def process_player_tick(user_id):
                     0,
                     2,
                 )
+
+            # Infrastructure attracts additional residents.
+            if infra_population_bonus > 0 and satisfaction >= 60:
+                population_change += random.randint(0, max(1, infra_population_bonus // 10))
 
             # -------------------------------------------------
             # Population limits
@@ -5684,31 +5776,58 @@ async def process_player_tick(user_id):
 # NATURAL DISASTERS
 # =========================================================
 
-async def create_daily_disaster_schedule():
-    today=iran_now().date()
-    day_start=datetime.combine(today, datetime.min.time(), tzinfo=IRAN_TZ)
-    max_minute=23*60+30
+async def create_weekly_disaster_schedule():
+    """
+    Schedule exactly four natural-disaster days in each calendar week.
+    One random disaster is scheduled on each selected day.
+    Existing rows are preserved, so restarting the bot does not reshuffle events.
+    """
+    today = iran_now().date()
+    week_start = today - timedelta(days=today.weekday())
+    week_end = week_start + timedelta(days=6)
+    day_start_time = datetime.min.time()
     async with db_pool.acquire() as conn:
-        cities=await conn.fetch("SELECT user_id FROM cities")
+        cities = await conn.fetch("SELECT user_id FROM cities")
         for city in cities:
-            uid=city["user_id"]
-            exists=await conn.fetchval("SELECT 1 FROM natural_disaster_schedule WHERE user_id=$1 AND disaster_date=$2 LIMIT 1", uid, today)
-            if exists:
+            uid = city["user_id"]
+            # Existing scheduled dates for this calendar week.
+            existing_rows = await conn.fetch(
+                """SELECT disaster_date FROM natural_disaster_schedule
+                   WHERE user_id=$1 AND disaster_date BETWEEN $2 AND $3""",
+                uid, week_start, week_end
+            )
+            existing_dates = {r["disaster_date"] for r in existing_rows}
+            needed = max(0, 4 - len(existing_dates))
+            if needed <= 0:
                 continue
-            count=random.randint(1,4)
-            minutes=None
-            for _ in range(200):
-                candidate=sorted(random.sample(range(30,max_minute+1),count))
-                if all(candidate[i]-candidate[i-1] >= MIN_DISASTER_GAP_MINUTES for i in range(1,count)):
-                    minutes=candidate; break
-            if minutes is None:
-                minutes=[30+i*MIN_DISASTER_GAP_MINUTES for i in range(count)]
-            disasters=[x[0] for x in random.sample(NATURAL_DISASTERS,count)]
-            for occurrence,(minute,name) in enumerate(zip(minutes,disasters),1):
-                scheduled=(day_start+timedelta(minutes=minute)).astimezone(timezone.utc)
+
+            # Never create a new event in a day that has already passed.
+            candidate_dates = [
+                week_start + timedelta(days=i)
+                for i in range(7)
+                if week_start + timedelta(days=i) >= today
+                and (week_start + timedelta(days=i)) not in existing_dates
+            ]
+            if not candidate_dates:
+                continue
+            chosen_dates = random.sample(candidate_dates, min(needed, len(candidate_dates)))
+            for disaster_date in chosen_dates:
+                minute = random.randint(8 * 60, 22 * 60 + 30)
+                disaster_name, _weight = random.choice(NATURAL_DISASTERS)
+                scheduled_local = datetime.combine(
+                    disaster_date,
+                    day_start_time,
+                    tzinfo=IRAN_TZ,
+                ) + timedelta(minutes=minute)
+                scheduled = scheduled_local.astimezone(timezone.utc)
+                occurrence = len(existing_dates) + 1
+                existing_dates.add(disaster_date)
                 await conn.execute(
-                    """INSERT INTO natural_disaster_schedule(user_id,disaster_date,occurrence_no,scheduled_at,disaster_name) VALUES($1,$2,$3,$4,$5) ON CONFLICT(user_id,disaster_date,occurrence_no) DO NOTHING""",
-                    uid,today,occurrence,scheduled,name
+                    """INSERT INTO natural_disaster_schedule
+                       (user_id,disaster_date,occurrence_no,scheduled_at,disaster_name)
+                       VALUES($1,$2,$3,$4,$5)
+                       ON CONFLICT(user_id,disaster_date,occurrence_no) DO NOTHING""",
+                    uid, disaster_date, occurrence, scheduled, disaster_name
                 )
 
 
@@ -5807,7 +5926,7 @@ async def game_tick():
     while True:
         try:
             await complete_building_constructions()
-            await create_daily_disaster_schedule()
+            await create_weekly_disaster_schedule()
             await trigger_due_natural_disasters()
             await process_weekly_payout()
             await process_group_transfers()
@@ -6193,6 +6312,42 @@ async def _miniapp_user(request):
     raise web.HTTPUnauthorized(text="Telegram WebApp authentication failed")
 
 
+_avatar_cache = {}
+
+async def miniapp_avatar(request):
+    """Return the current Telegram profile photo as a same-origin data URL.
+
+    The browser never loads the Telegram CDN directly, which avoids Telegram
+    WebView/CORS/referrer/cache issues that made profile photos intermittently blank.
+    """
+    user_id = await _miniapp_user(request)
+    now_ts = int(datetime.now(timezone.utc).timestamp())
+    cached = _avatar_cache.get(user_id)
+    if cached and now_ts - cached[0] < 300:
+        return web.json_response({"ok": True, "data_url": cached[1]})
+    try:
+        photos = await bot.get_user_profile_photos(user_id=user_id, limit=1)
+        if not photos or not photos.photos:
+            return web.json_response({"ok": False, "message": "profile photo not found"})
+        sizes = photos.photos[0]
+        best = sizes[-1]
+        tg_file = await bot.get_file(best.file_id)
+        if not tg_file or not tg_file.file_path:
+            return web.json_response({"ok": False, "message": "profile photo file not found"})
+        url = f"https://api.telegram.org/file/bot{BOT_TOKEN}/{tg_file.file_path}"
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15)) as session:
+            async with session.get(url, timeout=15) as resp:
+                if resp.status != 200:
+                    return web.json_response({"ok": False, "message": "profile photo download failed"}, status=502)
+                raw = await resp.read()
+                content_type = (resp.headers.get("Content-Type") or "image/jpeg").split(";",1)[0]
+        data_url = f"data:{content_type};base64,{base64.b64encode(raw).decode('ascii')}"
+        _avatar_cache[user_id] = (now_ts, data_url)
+        return web.json_response({"ok": True, "data_url": data_url})
+    except Exception:
+        logging.exception("Mini App avatar fetch failed for user %s", user_id)
+        return web.json_response({"ok": False, "message": "profile photo unavailable"}, status=200)
+
 async def miniapp_state(request):
     # Keep the Mini App read-only endpoint resilient: a failed background tick or
     # a legacy/missing optional table must not turn the whole Mini App into HTTP 500.
@@ -6204,16 +6359,22 @@ async def miniapp_state(request):
         city = await get_city(user_id)
         player = await get_player(user_id)
         resources = await get_resources(user_id)
+        await ensure_infrastructure_rows(user_id)
 
         async with db_pool.acquire() as conn:
             buildings = await conn.fetch(
                 "SELECT building_type, level FROM buildings WHERE user_id=$1 ORDER BY building_type",
                 user_id,
             )
-            active = await conn.fetchrow(
-                "SELECT * FROM crises WHERE user_id=$1 AND status='active' ORDER BY created_at DESC LIMIT 1",
+            infrastructure_rows = await conn.fetch(
+                "SELECT infrastructure_type, level FROM city_infrastructure WHERE user_id=$1 ORDER BY infrastructure_type",
                 user_id,
             )
+            active_rows = await conn.fetch(
+                "SELECT * FROM crises WHERE user_id=$1 AND status='active' ORDER BY created_at DESC",
+                user_id,
+            )
+            active = active_rows[0] if active_rows else None
             construction = None
             try:
                 construction = await conn.fetchrow(
@@ -6270,7 +6431,7 @@ async def miniapp_state(request):
 
             news_rows = []
             try:
-                news_rows = await conn.fetch("SELECT text,created_at FROM news WHERE user_id=$1 ORDER BY created_at DESC LIMIT 15", user_id)
+                news_rows = await conn.fetch("SELECT id,text,created_at FROM news WHERE user_id=$1 ORDER BY created_at DESC LIMIT 15", user_id)
             except Exception:
                 logging.exception("Mini App: news read failed")
 
@@ -6289,7 +6450,7 @@ async def miniapp_state(request):
                 live_events = await conn.fetch(
                     """SELECT id,disaster_name,building_type,damage,created_at,repaired
                        FROM natural_disaster_events
-                       WHERE user_id=$1 AND created_at >= NOW() - INTERVAL '6 hours'
+                       WHERE user_id=$1 AND created_at >= NOW() - INTERVAL '24 hours'
                        ORDER BY created_at DESC LIMIT 8""", user_id
                 )
             except Exception:
@@ -6304,7 +6465,9 @@ async def miniapp_state(request):
             },
             "resources": dict(resources) if resources else {},
             "buildings": [{"type": r["building_type"], "level": r["level"]} for r in buildings],
+            "infrastructure": [{"type": r["infrastructure_type"], "level": r["level"]} for r in infrastructure_rows],
             "crisis": dict(active) if active else None,
+            "crises": [dict(r) for r in active_rows],
             "construction": dict(construction) if construction else None,
             "offers": [dict(r) for r in offers],
             "social": {
@@ -6360,26 +6523,54 @@ async def miniapp_action(request):
         await add_xp(user_id,20)
         return web.json_response({"ok":True,"message":f"🏗️ {data['name']} برای سطح {current+1} وارد مرحله ساخت/ارتقا شد. زمان: {duration} ساعت."})
     if action == "resolve":
-        try: crisis_id=int(payload.get("crisis_id"))
-        except: return web.json_response({"ok":False,"message":"شناسه بحران نامعتبر است."},status=400)
-        async with db_pool.acquire() as conn:
-            async with conn.transaction():
-                await conn.execute("SELECT pg_advisory_xact_lock($1)",int(user_id))
-                crisis=await conn.fetchrow("SELECT * FROM crises WHERE id=$1 AND user_id=$2 FOR UPDATE",crisis_id,user_id)
-                if not crisis or crisis["status"]!="active": return web.json_response({"ok":False,"message":"این بحران فعال نیست."},status=400)
-                city=await conn.fetchrow("SELECT * FROM cities WHERE user_id=$1 FOR UPDATE",user_id); res=await conn.fetchrow("SELECT * FROM resources WHERE user_id=$1 FOR UPDATE",user_id)
-                data=CRISES.get(crisis["crisis_type"])
-                if not data: return web.json_response({"ok":False,"message":"نوع بحران نامعتبر است."},status=400)
-                required=max(20,crisis["severity"]*2); resource=data["resource"]
-                if res[resource]<required: return web.json_response({"ok":False,"message":f"❌ {resource} کافی نیست."},status=400)
-                chance=clamp(45+city[data["stat"]]//2,20,95)
-                if random.randint(1,100)>chance: return web.json_response({"ok":False,"message":"⚠️ عملیات مقابله ناموفق بود؛ دوباره تلاش کن."},status=400)
-                reward=data["reward"]+city["economy"]; eq=max(1,crisis["severity"]//20)
-                await conn.execute(f"UPDATE resources SET {resource}=GREATEST(0,{resource}-$1), coins=coins+$2, equipment=equipment+$3 WHERE user_id=$4",required,reward,eq,user_id)
-                await conn.execute("UPDATE crises SET status='resolved', resolved_at=NOW() WHERE id=$1",crisis_id)
-                await conn.execute("UPDATE cities SET satisfaction=LEAST(100,satisfaction+2), economy=LEAST(100,economy+2), population=population+3 WHERE user_id=$1",user_id)
-        await add_xp(user_id,30)
-        return web.json_response({"ok":True,"message":"✅ بحران با موفقیت مدیریت شد! رضایت، اقتصاد و جمعیت شهر افزایش یافت."})
+        try:
+            crisis_id = int(payload.get("crisis_id"))
+        except Exception:
+            return web.json_response({"ok":False,"message":"شناسه بحران نامعتبر است."}, status=400)
+        try:
+            async with db_pool.acquire() as conn:
+                async with conn.transaction():
+                    await conn.execute("SELECT pg_advisory_xact_lock($1)", int(user_id))
+                    crisis = await conn.fetchrow(
+                        "SELECT * FROM crises WHERE id=$1 AND user_id=$2 FOR UPDATE",
+                        crisis_id, user_id
+                    )
+                    if not crisis or crisis["status"] != "active":
+                        return web.json_response({"ok":False,"message":"این بحران فعال نیست."}, status=400)
+                    city = await conn.fetchrow("SELECT * FROM cities WHERE user_id=$1 FOR UPDATE", user_id)
+                    res = await conn.fetchrow("SELECT * FROM resources WHERE user_id=$1 FOR UPDATE", user_id)
+                    if not city or not res:
+                        return web.json_response({"ok":False,"message":"اطلاعات شهر یا منابع پیدا نشد."}, status=400)
+                    data = CRISES.get(crisis["crisis_type"])
+                    if not data:
+                        return web.json_response({"ok":False,"message":"نوع بحران نامعتبر است."}, status=400)
+                    resource = str(data.get("resource", "coins"))
+                    stat = str(data.get("stat", "crisis"))
+                    # Only allow real resource/stat columns; prevents malformed legacy data from producing HTTP 500.
+                    valid_resources = {"coins", "food", "materials", "energy", "water", "equipment"}
+                    valid_stats = {"security", "fire_safety", "health", "power", "water", "education", "recreation", "pollution_control", "infrastructure", "crisis", "economy"}
+                    if resource not in valid_resources or stat not in valid_stats:
+                        return web.json_response({"ok":False,"message":"تنظیمات این بحران نامعتبر است."}, status=400)
+                    required = max(20, int(crisis["severity"]) * 2)
+                    balance = int(res[resource] or 0)
+                    if balance < required:
+                        return web.json_response({"ok":False,"message":f"❌ {resource} کافی نیست؛ حداقل {required:,} واحد لازم است."}, status=400)
+                    chance = clamp(45 + int(city[stat] or 0) // 2, 20, 95)
+                    if random.randint(1,100) > chance:
+                        return web.json_response({"ok":False,"message":"⚠️ عملیات مقابله ناموفق بود؛ دوباره تلاش کن."}, status=400)
+                    reward = int(data.get("reward",0)) + int(city["economy"] or 0)
+                    eq = max(1, int(crisis["severity"]) // 20)
+                    await conn.execute(
+                        f"UPDATE resources SET {resource}=GREATEST(0,{resource}-$1), coins=coins+$2, equipment=equipment+$3 WHERE user_id=$4",
+                        required, reward, eq, user_id
+                    )
+                    await conn.execute("UPDATE crises SET status='resolved', resolved_at=NOW() WHERE id=$1 AND user_id=$2", crisis_id, user_id)
+                    await conn.execute("UPDATE cities SET satisfaction=LEAST(100,satisfaction+2), economy=LEAST(100,economy+2), population=population+3 WHERE user_id=$1", user_id)
+            await add_xp(user_id, 30)
+            return web.json_response({"ok":True,"message":"✅ بحران با موفقیت مدیریت شد! رضایت، اقتصاد و جمعیت شهر افزایش یافت."})
+        except Exception:
+            logging.exception("Mini App crisis resolve failed: user=%s crisis=%s", user_id, crisis_id)
+            return web.json_response({"ok":False,"message":"❌ مدیریت بحران انجام نشد. لطفاً دوباره تلاش کنید."}, status=200)
     if action == "expand_village":
         async with db_pool.acquire() as conn:
             async with conn.transaction():
@@ -6393,15 +6584,46 @@ async def miniapp_action(request):
                 await conn.execute("UPDATE resources SET coins=coins-$1 WHERE user_id=$2",cost,user_id)
                 await conn.execute("UPDATE cities SET villages=villages+1,land=land+1,housing_capacity=housing_capacity+200,population=population+50,satisfaction=LEAST(100,satisfaction+2),economy=LEAST(100,economy+2) WHERE user_id=$1",user_id)
         return web.json_response({"ok":True,"message":"🏘️ روستا با موفقیت به شهر اضافه شد."})
-    if action in {"tax_up","tax_down"}:
-        delta = 2 if action == "tax_up" else -2
+    if action == "infra_upgrade":
+        key = str(payload.get("infrastructure", ""))
+        data = INFRASTRUCTURES.get(key)
+        if not data:
+            return web.json_response({"ok":False,"message":"زیرساخت پیدا نشد."},status=400)
+        await ensure_infrastructure_rows(user_id)
         async with db_pool.acquire() as conn:
-            await conn.execute("UPDATE cities SET tax_rate=LEAST(25,GREATEST(0,tax_rate+$1)) WHERE user_id=$2",delta,user_id)
-        try:
-            await recalculate_city(user_id)
-        except Exception:
-            logging.exception("Mini App tax recalculation failed")
-        return web.json_response({"ok":True,"message":"💰 نرخ مالیات به‌روزرسانی شد."})
+            async with conn.transaction():
+                await conn.execute("SELECT pg_advisory_xact_lock($1)", int(user_id))
+                current = await conn.fetchval("SELECT level FROM city_infrastructure WHERE user_id=$1 AND infrastructure_type=$2 FOR UPDATE",user_id,key) or 0
+                if current >= 5:
+                    return web.json_response({"ok":False,"message":"🏆 این زیرساخت به بهترین سطح رسیده است."},status=400)
+                cost = int(data["costs"][current])
+                res = await conn.fetchrow("SELECT coins FROM resources WHERE user_id=$1 FOR UPDATE",user_id)
+                if not res or res["coins"] < cost:
+                    return web.json_response({"ok":False,"message":f"❌ سکه کافی نیست؛ هزینه ارتقا {cost:,} سکه است."},status=400)
+                await conn.execute("UPDATE resources SET coins=coins-$1 WHERE user_id=$2",cost,user_id)
+                await conn.execute("UPDATE city_infrastructure SET level=$1 WHERE user_id=$2 AND infrastructure_type=$3",current+1,user_id,key)
+        await recalculate_city(user_id)
+        effect=data["effects"][current]
+        return web.json_response({"ok":True,"message":f"🏗️ {data['name']} به سطح {current+1}/5 ({data['levels'][current]}) رسید.\n⭐ زیرساخت +{effect['infrastructure']} | 💰 درآمد +{effect['income_pct']}% | 👥 جذب مردم +{effect['population']}% | 😊 رضایت +{effect['satisfaction']}%"})
+
+    if action in {"tax_up","tax_down"}:
+        direction_up = action == "tax_up"
+        delta = 2 if direction_up else -2
+        async with db_pool.acquire() as conn:
+            row = await conn.fetchrow("SELECT tax_rate FROM cities WHERE user_id=$1 FOR UPDATE",user_id)
+            if not row:
+                return web.json_response({"ok":False,"message":"شهر پیدا نشد."},status=404)
+            old_rate=int(row["tax_rate"])
+            new_rate=max(0,min(25,old_rate+delta))
+            if new_rate==old_rate:
+                return web.json_response({"ok":False,"message":"⚠️ نرخ مالیات به حد مجاز رسیده است."},status=400)
+            await conn.execute("UPDATE cities SET tax_rate=$1 WHERE user_id=$2",new_rate,user_id)
+        await recalculate_city(user_id)
+        if direction_up:
+            msg=f"📈 مالیات از {old_rate}% به {new_rate}% افزایش یافت.\n\nاثر این تصمیم:\n💰 درآمد سکه در ساعت: +20%\n😊 رضایت مردم: -10%"
+        else:
+            msg=f"📉 مالیات از {old_rate}% به {new_rate}% کاهش یافت.\n\nاثر این تصمیم:\n💰 درآمد سکه در ساعت: -10%\n😊 رضایت مردم: +15%"
+        return web.json_response({"ok":True,"message":msg})
     if action == "market_buy":
         try: offer_id=int(payload.get("offer_id"))
         except Exception: return web.json_response({"ok":False,"message":"پیشنهاد نامعتبر است."},status=400)
@@ -6495,10 +6717,7 @@ async def health(request):
 async def start_web_server():
     app = web.Application()
 
-    app.router.add_get(
-        "/",
-        health,
-    )
+    app.router.add_get("/", miniapp_page)
 
     app.router.add_get(
         "/health",
@@ -6507,6 +6726,8 @@ async def start_web_server():
 
     app.router.add_get("/webapp", miniapp_page)
     app.router.add_get("/webapp/", miniapp_page)
+    app.router.add_static("/webapp/assets", path=str(Path(__file__).with_name("webapp") / "assets"), name="webapp-assets")
+    app.router.add_get("/webapp/api/avatar", miniapp_avatar)
     app.router.add_get("/webapp/api/state", miniapp_state)
     app.router.add_post("/webapp/api/action", miniapp_action)
 

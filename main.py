@@ -1016,6 +1016,10 @@ async def init_db():
             )
             """
         )
+        await conn.execute("ALTER TABLE city_infrastructure ADD COLUMN IF NOT EXISTS target_level INTEGER")
+        await conn.execute("ALTER TABLE city_infrastructure ADD COLUMN IF NOT EXISTS ready_at TIMESTAMPTZ")
+        await conn.execute("ALTER TABLE city_infrastructure ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ")
+        await conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS one_active_infrastructure_upgrade_per_user ON city_infrastructure(user_id) WHERE ready_at IS NOT NULL AND target_level IS NOT NULL AND target_level > level")
 
         await conn.execute(
             """
@@ -5913,6 +5917,43 @@ async def complete_building_constructions():
             logging.exception("Could not notify completed construction")
 
 
+async def complete_infrastructure_upgrades():
+    now = now_utc()
+    async with db_pool.acquire() as conn:
+        rows = await conn.fetch(
+            """SELECT user_id,infrastructure_type,target_level FROM city_infrastructure
+               WHERE ready_at IS NOT NULL AND target_level IS NOT NULL AND target_level > level AND ready_at <= $1
+               ORDER BY ready_at LIMIT 200""", now
+        )
+    for row in rows:
+        async with db_pool.acquire() as conn:
+            async with conn.transaction():
+                locked = await conn.fetchrow(
+                    """SELECT * FROM city_infrastructure WHERE user_id=$1 AND infrastructure_type=$2
+                       AND ready_at IS NOT NULL AND target_level IS NOT NULL AND target_level > level FOR UPDATE""",
+                    row["user_id"], row["infrastructure_type"]
+                )
+                if not locked:
+                    continue
+                await conn.execute(
+                    """UPDATE city_infrastructure SET level=target_level, target_level=NULL, ready_at=NULL, started_at=NULL
+                       WHERE user_id=$1 AND infrastructure_type=$2""",
+                    row["user_id"], row["infrastructure_type"]
+                )
+                data = INFRASTRUCTURES.get(row["infrastructure_type"], {})
+                name = data.get("name", "زیرساخت")
+                target = int(row["target_level"])
+                await conn.execute(
+                    "INSERT INTO news(user_id,text) VALUES($1,$2)",
+                    row["user_id"], f"🎉 {name} با موفقیت به سطح {target}/5 رسید."
+                )
+        try:
+            await recalculate_city(row["user_id"])
+            await bot.send_message(row["user_id"], f"🎉 <b>ارتقای زیرساخت تمام شد!</b>\n\n{safe_text(name)} اکنون در <b>سطح {target}</b> قرار دارد.")
+        except Exception:
+            logging.exception("Could not notify completed infrastructure upgrade")
+
+
 async def game_tick():
     """
     حلقه اصلی بازی.
@@ -5926,6 +5967,7 @@ async def game_tick():
     while True:
         try:
             await complete_building_constructions()
+            await complete_infrastructure_upgrades()
             await create_weekly_disaster_schedule()
             await trigger_due_natural_disasters()
             await process_weekly_payout()
@@ -6367,7 +6409,7 @@ async def miniapp_state(request):
                 user_id,
             )
             infrastructure_rows = await conn.fetch(
-                "SELECT infrastructure_type, level FROM city_infrastructure WHERE user_id=$1 ORDER BY infrastructure_type",
+                "SELECT infrastructure_type, level, target_level, started_at, ready_at FROM city_infrastructure WHERE user_id=$1 ORDER BY infrastructure_type",
                 user_id,
             )
             active_rows = await conn.fetch(
@@ -6465,7 +6507,7 @@ async def miniapp_state(request):
             },
             "resources": dict(resources) if resources else {},
             "buildings": [{"type": r["building_type"], "level": r["level"]} for r in buildings],
-            "infrastructure": [{"type": r["infrastructure_type"], "level": r["level"]} for r in infrastructure_rows],
+            "infrastructure": [{"type": r["infrastructure_type"], "level": r["level"], "target_level": r["target_level"], "started_at": r["started_at"], "ready_at": r["ready_at"]} for r in infrastructure_rows],
             "crisis": dict(active) if active else None,
             "crises": [dict(r) for r in active_rows],
             "construction": dict(construction) if construction else None,
@@ -6593,18 +6635,34 @@ async def miniapp_action(request):
         async with db_pool.acquire() as conn:
             async with conn.transaction():
                 await conn.execute("SELECT pg_advisory_xact_lock($1)", int(user_id))
-                current = await conn.fetchval("SELECT level FROM city_infrastructure WHERE user_id=$1 AND infrastructure_type=$2 FOR UPDATE",user_id,key) or 0
+                current_row = await conn.fetchrow("SELECT * FROM city_infrastructure WHERE user_id=$1 AND infrastructure_type=$2 FOR UPDATE",user_id,key)
+                current = int(current_row["level"] or 0)
+                if current_row["ready_at"] is not None and current_row["target_level"] is not None and int(current_row["target_level"]) > current:
+                    remain=max(0,int((current_row["ready_at"]-now_utc()).total_seconds()))
+                    return web.json_response({"ok":False,"message":f"⏳ ارتقای {data['name']} در حال انجام است؛ {remain//3600} ساعت و {(remain%3600)//60} دقیقه باقی مانده."},status=400)
+                active = await conn.fetchrow(
+                    "SELECT infrastructure_type,target_level,ready_at FROM city_infrastructure WHERE user_id=$1 AND ready_at IS NOT NULL AND target_level IS NOT NULL AND target_level > level LIMIT 1", user_id
+                )
+                if active:
+                    remain=max(0,int((active["ready_at"]-now_utc()).total_seconds()))
+                    active_name=INFRASTRUCTURES.get(active["infrastructure_type"],{}).get("name","زیرساخت")
+                    return web.json_response({"ok":False,"message":f"⏳ {active_name} در حال ارتقاست؛ {remain//3600} ساعت و {(remain%3600)//60} دقیقه باقی مانده."},status=400)
                 if current >= 5:
                     return web.json_response({"ok":False,"message":"🏆 این زیرساخت به بهترین سطح رسیده است."},status=400)
                 cost = int(data["costs"][current])
                 res = await conn.fetchrow("SELECT coins FROM resources WHERE user_id=$1 FOR UPDATE",user_id)
                 if not res or res["coins"] < cost:
                     return web.json_response({"ok":False,"message":f"❌ سکه کافی نیست؛ هزینه ارتقا {cost:,} سکه است."},status=400)
+                target=current+1
+                # Same progression style as building upgrades: higher levels take longer.
+                duration_hours=[2,4,6,10,16][current]
+                ready_at=now_utc()+timedelta(hours=duration_hours)
                 await conn.execute("UPDATE resources SET coins=coins-$1 WHERE user_id=$2",cost,user_id)
-                await conn.execute("UPDATE city_infrastructure SET level=$1 WHERE user_id=$2 AND infrastructure_type=$3",current+1,user_id,key)
-        await recalculate_city(user_id)
-        effect=data["effects"][current]
-        return web.json_response({"ok":True,"message":f"🏗️ {data['name']} به سطح {current+1}/5 ({data['levels'][current]}) رسید.\n⭐ زیرساخت +{effect['infrastructure']} | 💰 درآمد +{effect['income_pct']}% | 👥 جذب مردم +{effect['population']}% | 😊 رضایت +{effect['satisfaction']}%"})
+                await conn.execute(
+                    "UPDATE city_infrastructure SET target_level=$1, started_at=NOW(), ready_at=$2 WHERE user_id=$3 AND infrastructure_type=$4",
+                    target, ready_at, user_id, key
+                )
+        return web.json_response({"ok":True,"message":f"🏗️ {data['name']} برای سطح {target}/5 وارد مرحله ارتقا شد.\n⏳ زمان تکمیل: {duration_hours} ساعت.\n💰 هزینه: {cost:,} سکه"})
 
     if action in {"tax_up","tax_down"}:
         direction_up = action == "tax_up"

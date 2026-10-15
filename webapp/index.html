@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>شهر من</title>
-<meta name="version" content="20261002-v33-buildings-reference">
+<meta name="version" content="20261015-v35-infrastructure-layout">
 <script src="https://telegram.org/js/telegram-web-app.js"></script><script>
 // GitHub Pages-safe asset paths: all images resolve relative to this index.html.
 const ASSET_DATA = {
@@ -226,6 +226,20 @@ body{background:#06131b}
 .building-menu-action{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;direction:rtl}.building-menu-level{font-size:10px;color:#bcd2d6}.building-upgrade-btn{min-width:75px;border:1px solid #e3b73f;border-radius:12px;background:linear-gradient(180deg,#ffd66a,#e6aa31);color:#172027;font-weight:900;font-size:12px;padding:10px 7px;box-shadow:0 4px 12px #0007,inset 0 1px 0 #fff8;cursor:pointer;transition:.14s}.building-upgrade-btn:active{transform:scale(.94);filter:brightness(1.08)}.building-menu-progress{width:70px;height:6px;border-radius:8px;background:#12333d;overflow:hidden;border:1px solid #386a74}.building-menu-progress i{display:block;height:100%;width:0;background:linear-gradient(90deg,#35db82,#7ff5ad);border-radius:8px;transition:width .25s linear}.building-menu-card.is-building .building-menu-progress i{animation:none}.building-menu-action small{font-size:8px;color:#b6cdd1;text-align:center}.building-damage-section{padding-bottom:100px}
 @keyframes buildingCardIn{to{opacity:1;transform:translateY(0)}}@keyframes buildingProgress{50%{width:82%}}@keyframes constructionPulse{from{width:42%}to{width:82%}}
 @media(max-width:500px){.building-menu-card{grid-template-columns:108px minmax(0,1fr) 72px;gap:7px;min-height:108px;padding:6px 7px}.building-menu-art{width:103px;height:88px}.building-menu-art img{width:96px;height:74px}.building-menu-name{font-size:16px}.building-menu-desc{font-size:9px}.building-menu-meta span{font-size:8px;padding:3px 4px}.building-upgrade-btn{min-width:65px;font-size:11px;padding:9px 5px}.building-menu-level{font-size:9px}.buildings-menu-hero{padding:13px}.buildings-menu-count{width:46px;height:46px}}
+
+/* v35: reference-matched infrastructure showcase */
+.infra-reference-page{padding:0 0 18px;overflow:visible;background:transparent}
+.infra-city-banner{position:relative;margin:-2px -2px 10px;border-radius:0 0 17px 17px;overflow:hidden;box-shadow:0 7px 22px #0007;border-bottom:1px solid #2b7997;aspect-ratio:928/177;background:#062238}
+.infra-city-banner>img{display:block;width:100%;height:100%;object-fit:cover}
+.infra-live-profile{position:absolute;left:3%;top:14%;width:43%;max-width:260px;display:flex;flex-direction:column;gap:3px;padding:7px 10px;border:1px solid #57a9ca;border-radius:15px;background:#05253ad9;box-shadow:0 4px 14px #0007;direction:rtl;color:#fff}
+.infra-live-profile b{font-size:clamp(10px,3.2vw,15px);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.infra-live-profile small{font-size:clamp(8px,2.4vw,10px);color:#d6edf5}.infra-live-profile>span{height:6px;border-radius:9px;background:#092e4a;overflow:hidden;border:1px solid #2b7997}.infra-live-profile>span i{display:block;height:100%;border-radius:9px;background:linear-gradient(90deg,#00a9ff,#55f2a3)}
+.infra-reference-heading{display:flex;align-items:center;gap:12px;margin:0 2px 12px;padding:12px 13px;min-height:68px;border:1px solid #2580a5;border-radius:17px;background:linear-gradient(120deg,#06263c,#0a3952 55%,#08243a);box-shadow:inset 0 1px #ffffff18,0 6px 15px #0005}
+.infra-reference-heading>img{width:55px;height:55px;object-fit:contain;filter:drop-shadow(0 3px 5px #0007)}.infra-reference-heading>div{flex:1;min-width:0}.infra-reference-heading h2{margin:0;color:#f4f8ff;font-size:clamp(17px,5vw,23px);font-weight:1000}.infra-reference-heading p{margin:4px 0 0;color:#c4dce9;font-size:12px;line-height:1.5}.infra-heading-city{font-size:27px;opacity:.9}
+.infra-showcase-list{display:flex;flex-direction:column;gap:12px}.infra-showcase-card{overflow:hidden;border:1px solid #2583aa;border-radius:19px;background:linear-gradient(145deg,#062c43,#031d30 68%,#082d43);box-shadow:inset 0 1px #ffffff1c,0 8px 20px #0006;animation:cardRise .32s both;animation-delay:calc(var(--card-order)*35ms);transition:transform .16s,box-shadow .16s}.infra-showcase-card:active{transform:scale(.99);box-shadow:0 4px 12px #0006}.infra-showcase-art{height:auto;aspect-ratio:360/140;position:relative;overflow:hidden;background:#092d41}.infra-showcase-art img{display:block;width:100%;height:100%;object-fit:cover}.infra-showcase-art:after{content:"";position:absolute;inset:45% 0 0;background:linear-gradient(0deg,#041d30c9,transparent);pointer-events:none}.infra-art-level{position:absolute;z-index:1;bottom:8px;left:12px;padding:4px 9px;border-radius:8px;background:#052d3bdf;border:1px solid #39c8b0;color:#9fffd6;font-weight:900;font-size:12px}
+.infra-showcase-body{padding:11px 12px 12px}.infra-showcase-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:8px}.infra-showcase-heading h3{margin:0;font-size:clamp(16px,4.7vw,20px);font-weight:1000;color:#f1f8ff}.infra-showcase-heading p{margin:4px 0 0;color:#c1d8e3;font-size:12px;line-height:1.5}.infra-level-badge{white-space:nowrap;color:#9fffc8;background:#0b3b3b;border:1px solid #267a78;border-radius:9px;padding:5px 7px;font-size:11px;font-weight:900}.infra-showcase-progress{display:flex;gap:5px;margin:10px 0 8px}.infra-showcase-progress i{height:8px;flex:1;border-radius:7px;background:linear-gradient(180deg,#15465c,#103348);border:1px solid #1a5973}.infra-showcase-progress i.on{background:linear-gradient(180deg,#52ffad,#08c96d);border-color:#42efa0;box-shadow:0 0 8px #13e97b55}.infra-showcase-progress i.next{background:linear-gradient(90deg,#25d985,#17465b)}
+.infra-showcase-levels{display:flex;gap:5px;overflow-x:auto;padding:0 0 5px;scrollbar-width:thin}.infra-showcase-levels span{white-space:nowrap;font-size:10px;color:#b2c9d4;background:#08283a;border:1px solid #23516a;border-radius:7px;padding:4px 6px}.infra-showcase-levels span.done{color:#c8ffe0;background:#0b3c36;border-color:#25866b}.infra-showcase-effects{display:flex;flex-wrap:wrap;gap:7px 12px;margin:7px 0 10px;color:#d2e9f4;font-size:11px}.infra-showcase-effects span{white-space:nowrap}.infra-showcase-actions{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:8px}.infra-showcase-actions>b{font-size:14px;color:#ffe4a0}.infra-upgrade-button{border:1px solid #ffdf83;border-radius:13px;padding:10px 15px;background:linear-gradient(145deg,#ffe28b,#ffb72b 70%,#e99613);color:#172b37;font-size:15px;font-weight:1000;box-shadow:inset 0 1px #fff9,0 4px 9px #0006;min-width:132px}.infra-upgrade-button:active{transform:scale(.96);filter:brightness(1.08)}.infra-showcase-upgrade{display:flex;flex-direction:column;gap:5px;padding:9px 11px;border-radius:12px;background:#082e3d;border:1px solid #2a7890;color:#b8e8f2;font-size:12px}.infra-showcase-upgrade b{color:#a8ffd2;font-size:13px}.infra-showcase-card.upgrading{border-color:#4dd4b0;box-shadow:0 0 13px #13d89b26,0 8px 20px #0006}
+@media(min-width:600px){.infra-showcase-art{aspect-ratio:928/260}.infra-showcase-body{padding:14px 17px}.infra-showcase-heading h3{font-size:22px}.infra-showcase-heading p{font-size:14px}}
+
 </style></head>
 <body>
 <div class="app"><div class="top"><div class="title">🏙️ شهر من</div><div class="pill" id="mayor">در حال ورود...</div></div><main id="app"><div class="loader">در حال بارگذاری شهر...</div></main></div>
@@ -339,30 +353,42 @@ function crisis(){const cs=Array.isArray(S.crises)?S.crises:(S.crisis?[S.crisis]
 function infrastructure(){
  const rows=Object.fromEntries((S.infrastructure||[]).map(x=>[x.type,x]));
  const data={
-  roads:{name:'🛣️ راه‌ها و حمل‌ونقل',desc:'بهبود کیفیت جاده‌ها و دسترسی شهری.'},
-  water_sewage:{name:'💧 آب و فاضلاب',desc:'آب سالم، جمع‌آوری فاضلاب و بازچرخانی آب.'},
-  power_grid:{name:'⚡ شبکه برق',desc:'تأمین پایدار برق و کاهش قطعی‌ها.'},
-  internet:{name:'🌐 اینترنت و ارتباطات',desc:'ارتقای ارتباطات از 2G تا 5G و فیبر نوری.'},
-  public_transport:{name:'🚌 حمل‌ونقل عمومی',desc:'اتوبوس، BRT و مترو برای جابه‌جایی سریع شهروندان.'},
-  gas:{name:'🔥 شبکه گاز',desc:'پایداری سوخت شهری و گرمایش امن.'},
-  waste:{name:'🗑️ پسماند و بازیافت',desc:'جمع‌آوری، تفکیک، بازیافت و کاهش آلودگی.'},
-  telecom:{name:'📡 مخابرات',desc:'پوشش ارتباطی، فیبر و زیرساخت مخابراتی شهر.'},
-  drainage:{name:'🌧️ آب‌های سطحی و سیلاب',desc:'هدایت آب باران و کاهش خسارت سیلاب.'},
-  emergency_network:{name:'🚑 شبکه امداد شهری',desc:'هماهنگی آتش‌نشانی، اورژانس و واکنش سریع.'}
+  roads:{name:'راه‌ها و حمل‌ونقل',icon:'🛣️',desc:'بهبود کیفیت جاده‌ها و دسترسی شهری.',image:'infra_12_roads_image.png'},
+  water_sewage:{name:'آب و فاضلاب',icon:'💧',desc:'آب سالم، جمع‌آوری فاضلاب و بازچرخانی آب.',image:'infra_13_water_image.png'},
+  power_grid:{name:'شبکه برق',icon:'⚡',desc:'تأمین پایدار برق و کاهش قطعی‌ها.',image:'infra_14_power_image.png'},
+  internet:{name:'اینترنت و ارتباطات',icon:'🌐',desc:'ارتقای ارتباطات از 2G تا 5G و فیبر نوری.',image:'building_menu_university.png'},
+  public_transport:{name:'حمل‌ونقل عمومی',icon:'🚌',desc:'اتوبوس، BRT و مترو برای جابه‌جایی سریع شهروندان.',image:'building_menu_roads.png'},
+  gas:{name:'شبکه گاز',icon:'🔥',desc:'پایداری سوخت شهری و گرمایش امن.',image:'building_menu_power.png'},
+  waste:{name:'پسماند و بازیافت',icon:'🗑️',desc:'جمع‌آوری، تفکیک، بازیافت و کاهش آلودگی.',image:'building_menu_waste.png'},
+  telecom:{name:'مخابرات',icon:'📡',desc:'پوشش ارتباطی، فیبر و زیرساخت مخابراتی شهر.',image:'building_menu_university.png'},
+  drainage:{name:'آب‌های سطحی و سیلاب',icon:'🌧️',desc:'هدایت آب باران و کاهش خسارت سیلاب.',image:'building_menu_water.png'},
+  emergency_network:{name:'شبکه امداد شهری',icon:'🚑',desc:'هماهنگی آتش‌نشانی، اورژانس و واکنش سریع.',image:'building_menu_emergency.png'}
  };
  const effects={
   roads:[[5,2,2,2],[7,3,3,3],[9,5,5,4],[12,7,7,5],[16,10,10,7]],water_sewage:[[5,1,2,3],[7,2,3,4],[9,3,4,5],[12,4,6,6],[16,6,9,8]],power_grid:[[5,2,2,2],[7,3,3,3],[10,5,5,4],[13,7,7,5],[17,10,10,7]],internet:[[4,2,2,1],[6,3,3,2],[8,5,5,3],[11,8,7,4],[15,12,10,6]],public_transport:[[5,2,2,2],[7,3,3,3],[9,4,5,4],[12,6,7,6],[16,9,10,8]],gas:[[4,1,1,2],[6,2,2,3],[8,3,4,4],[11,5,6,5],[14,7,8,7]],waste:[[4,1,1,2],[6,2,2,3],[8,3,3,4],[11,4,5,5],[14,6,7,7]],telecom:[[4,2,1,1],[6,3,2,2],[8,4,4,3],[11,6,6,4],[14,9,8,6]],drainage:[[4,1,1,2],[6,2,2,3],[8,3,3,4],[11,4,5,5],[14,6,7,7]],emergency_network:[[5,1,1,2],[7,2,2,3],[9,3,3,4],[12,4,5,5],[15,6,7,7]]
  };
  const levelsText={roads:['راه خاکی','آسفالت شهری','بلوارها','بزرگراه','شبکه هوشمند'],water_sewage:['آبرسانی اولیه','شبکه شهری','تصفیه‌خانه','بازچرخانی','مدیریت هوشمند'],power_grid:['شبکه محلی','شبکه شهری','برق پایدار','شبکه هوشمند','فوق‌پایدار'],internet:['2G','3G','4G','4.5G + فیبر','5G + فیبر'],public_transport:['اتوبوس شهری','خطوط سریع','BRT','مترو','حمل‌ونقل هوشمند'],gas:['شبکه محلی','شبکه شهری','فشار پایدار','گاز هوشمند','شبکه پاک'],waste:['جمع‌آوری','تفکیک','بازیافت','تبدیل انرژی','چرخه کامل'],telecom:['آنتن محلی','پوشش شهری','4G+','فیبر نوری','شبکه یکپارچه'],drainage:['جوی شهری','شبکه آبرو','شبکه فاضلاب','مدیریت سیلاب','سیستم هوشمند'],emergency_network:['پایگاه امداد','شبکه امداد','مرکز کنترل','واکنش سریع','شبکه یکپارچه']};
  const costs={roads:[500,1200,3000,7000,14000],water_sewage:[450,1200,3000,6500,12000],power_grid:[550,1400,3300,7500,14000],internet:[400,1000,2500,6000,12000],public_transport:[500,1400,3200,7500,15000],gas:[450,1100,2800,6500,12000],waste:[400,1000,2400,5500,11000],telecom:[450,1100,2600,6000,11500],drainage:[400,1000,2300,5200,10000],emergency_network:[500,1200,2800,6500,12500]};
- const cards=Object.entries(data).map(([k,d])=>{
-   const row=rows[k]||{level:0,target_level:null,ready_at:null};
-   const lv=Math.max(0,Math.min(5,Number(row.level||0))); const upgrading=row.ready_at&&Number(row.target_level||0)>lv;
-   const next=lv<5?lv:4, ef=effects[k][next], cost=costs[k][next];
-   const ready=upgrading?new Date(row.ready_at).getTime():0;
-   return `<div class="infra-card ${upgrading?'upgrading':''}"><div class="infra-head"><div><h3>${d.name}</h3><p>${d.desc}</p></div><div class="infra-level">سطح ${lv}/5</div></div><div class="infra-progress">${[0,1,2,3,4].map(i=>`<i class="${i<lv?'on':''} ${upgrading&&i===lv?'next':''}"></i>`).join('')}</div><div class="infra-levels">${levelsText[k].map((x,i)=>`<span class="${i<lv?'done':''}">L${i+1}: ${x}</span>`).join('')}</div><div class="infra-effect">⭐ زیرساخت +${ef[0]} · 💰 درآمد +${ef[1]}% · 👥 جذب مردم +${ef[2]}% · 😊 رضایت +${ef[3]}%</div>${upgrading?`<div class="infra-upgrade-time" data-infra-ready="${ready}">⏳ در حال ارتقا…</div>`:`<div class="infra-actions"><b>هزینه: ${num(cost)} 🪙</b>${lv<5?`<button class="btn primary" onclick="upgradeInfra('${k}')">⬆️ شروع ارتقا</button>`:'<span class="maxed">🏆 حداکثر سطح</span>'}</div>`}</div>`;
+ const cards=Object.entries(data).map(([k,d],idx)=>{
+  const row=rows[k]||{level:0,target_level:null,ready_at:null};
+  const lv=Math.max(0,Math.min(5,Number(row.level||0))), upgrading=!!(row.ready_at&&Number(row.target_level||0)>lv);
+  const next=Math.min(lv,4), ef=effects[k][next], cost=costs[k][next], ready=upgrading?new Date(row.ready_at).getTime():0;
+  const img=ASSET(d.image);
+  return `<article class="infra-showcase-card ${upgrading?'upgrading':''}" style="--card-order:${idx}">
+   <div class="infra-showcase-art"><img src="${img}" alt="${esc(d.name)}" loading="lazy"><div class="infra-art-level">سطح ${lv}/5</div></div>
+   <div class="infra-showcase-body"><div class="infra-showcase-heading"><div><h3>${d.icon} ${d.name}</h3><p>${d.desc}</p></div><span class="infra-level-badge">${lv===5?'🏆 تکمیل':`سطح ${lv}/5`}</span></div>
+    <div class="infra-showcase-progress" aria-label="پیشرفت سطح">${[0,1,2,3,4].map(i=>`<i class="${i<lv?'on':''} ${upgrading&&i===lv?'next':''}"></i>`).join('')}</div>
+    <div class="infra-showcase-levels">${levelsText[k].map((x,i)=>`<span class="${i<lv?'done':''}">L${i+1}: ${x}</span>`).join('')}</div>
+    <div class="infra-showcase-effects"><span>⭐ زیرساخت +${ef[0]}</span><span>💰 درآمد +${ef[1]}%</span><span>👥 جذب مردم +${ef[2]}%</span><span>😊 رضایت +${ef[3]}%</span></div>
+    ${upgrading?`<div class="infra-showcase-upgrade"><b>⏳ ارتقا در حال انجام</b><span data-infra-ready="${ready}">در حال محاسبه زمان…</span></div>`:`<div class="infra-showcase-actions"><b>🪙 هزینه: ${lv<5?num(cost):'—'}</b>${lv<5?`<button class="infra-upgrade-button" onclick="upgradeInfra('${k}')">شروع ارتقا <span>⬆️</span></button>`:'<span class="maxed">🏆 حداکثر سطح</span>'}</div>`}
+   </div></article>`;
  }).join('');
- return `<div class="section infrastructure-page page-entrance"><div class="page-title"><div><h2>🏙️ زیرساخت‌های شهر</h2><div class="title-sub">هر ارتقا زمان می‌برد و اثرش بعد از تکمیل فعال می‌شود</div></div><span class="title-icon">⚙️</span></div><div class="infra-title" style="display:none"><h2>🏙️ زیرساخت‌های شهر</h2><p>هر ارتقا مثل ساختمان زمان می‌برد و پس از پایان، اثراتش روی شهر اعمال می‌شود.</p></div>${cards}</div>`;
+ const p=S.player||{}, xp=Number(p.xp||0), xpPct=Math.max(0,Math.min(100,(xp%750)/750*100));
+ return `<div class="section infrastructure-page infra-reference-page page-entrance">
+  <div class="infra-city-banner"><img src="${ASSET('infra_01_full_city_header.png')}" alt="شهر من"/><div class="infra-live-profile"><b>👑 ${esc(p.first_name||p.username||'شهردار')}</b><small>شهردار شهر · سطح ${num(p.level||S.city?.city_level||1)}</small><span><i style="width:${xpPct}%"></i></span><small>${num(xp)} XP</small></div></div>
+  <div class="infra-reference-heading"><img src="${ASSET('infra_11_infrastructure_header_icon.png')}" alt=""/><div><h2>زیرساخت‌های شهر</h2><p>هر ارتقا زمان می‌برد و اثرش بعد از تکمیل فعال می‌شود.</p></div><span class="infra-heading-city">🏙️</span></div>
+  <div class="infra-showcase-list">${cards}</div>
+ </div>`;
 }
 function map(){let c=S.city;return `<div class="section"><h2>🗺️ نقشه زنده شهر</h2>${scene(false)}<div class="grid" style="margin-top:9px"><div class="card">🗺️ زمین<strong>${c.land}</strong></div><div class="card">🏘️ روستا<strong>${c.villages}</strong></div><div class="card">🏠 ظرفیت مسکن<strong>${num(c.housing_capacity)}</strong></div><div class="card">💼 شغل<strong>${num(c.jobs)}</strong></div></div><button class="btn primary" style="width:100%;margin-top:9px" onclick="expand()">🏘️ جذب روستا</button></div>`}
 function economy(){let c=S.city,r=S.resources;return `<div class="section"><h2>💰 اقتصاد شهر</h2><div class="grid"><div class="card">📈 قدرت اقتصاد<strong>${c.economy}%</strong></div><div class="card">🏷️ مالیات<strong>${c.tax_rate}%</strong></div><div class="card">👥 جمعیت<strong>${num(c.population)}</strong></div><div class="card">💼 شغل<strong>${num(c.jobs)}</strong></div></div><div class="buttons" style="margin-top:9px"><button class="btn primary" onclick="act({action:'tax_up'})">📈 مالیات +۲٪</button><button class="btn" onclick="act({action:'tax_down'})">📉 مالیات -۲٪</button><button class="btn" onclick="show('market')">🏪 بازار</button></div></div>`}
